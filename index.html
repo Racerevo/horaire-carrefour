@@ -1,0 +1,114 @@
+<!DOCTYPE html>
+<html lang="fr">
+<head>
+  <meta charset="UTF-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+  <title>Horaire Carrefour</title>
+  <link rel="manifest" href="manifest.json" />
+  <meta name="theme-color" content="#0f172a" />
+  <link rel="apple-touch-icon" href="icon-192.png" />
+  <link rel="icon" type="image/png" href="icon-192.png" />
+  <link rel="stylesheet" href="styles.css" />
+</head>
+<body>
+  <div class="app-shell">
+    <section id="login-screen" class="panel active">
+      <div class="login-card">
+        <h1>Connexion employé</h1>
+        <p>Identifiant = votre nom. Mot de passe attribué.</p>
+        <form id="login-form">
+          <label>
+            Nom
+            <input type="text" id="login-name" autocomplete="username" required />
+          </label>
+          <label>
+            Mot de passe
+            <input type="password" id="login-password" autocomplete="current-password" required />
+          </label>
+          <button type="submit" class="button primary">Se connecter</button>
+          <p id="login-error" class="feedback hidden"></p>
+        </form>
+      </div>
+      <div class="brand-mark" aria-label="Carrefour">
+        <img src="logoCarrefour.png" alt="Logo Carrefour" />
+      </div>
+    </section>
+
+    <section id="app-screen" class="panel">
+      <header class="topbar">
+        <div>
+          <h1>Horaire Carrefour</h1>
+          <p id="welcome-text">Bienvenue</p>
+        </div>
+        <div class="week-nav">
+          <button id="prev-week" class="icon-button">◀</button>
+          <div>
+            <p class="small">Semaine du</p>
+            <strong id="week-label"></strong>
+          </div>
+          <button id="next-week" class="icon-button">▶</button>
+        </div>
+        <button id="logout-button" class="button secondary">Déconnexion</button>
+      </header>
+
+      <div class="workspace">
+        <aside class="sidebar">
+          <div class="panel-title">Employés</div>
+          <ul id="user-list" class="user-list"></ul>
+        </aside>
+
+        <main class="main-content">
+          <section class="shared-panel">
+            <div class="section-title">
+              <h2>Emploi du temps partagé</h2>
+            </div>
+            <div id="shared-grid" class="shared-grid"></div>
+            <div class="shared-summary" id="overlap-summary"></div>
+          </section>
+
+          <section class="schedule-panel">
+            <div class="section-title">
+              <h2 id="schedule-title">Emploi du temps</h2>
+              <span id="user-color-dot" class="color-dot"></span>
+            </div>
+            <div class="schedule-actions">
+              <button id="toggle-edit-panel" class="button secondary hidden">Modifier l'emploi du temps</button>
+            </div>
+            <div class="week-days" id="week-days"></div>
+            <div id="schedule-grid" class="schedule-grid"></div>
+            <div id="edit-panel" class="edit-panel hidden"></div>
+          </section>
+        </main>
+
+      </div>
+      <div class="brand-mark app-brand" aria-label="Carrefour">
+        <img src="logoCarrefour.png" alt="Logo Carrefour" />
+      </div>
+    </section>
+  </div>
+
+  <div class="chat-float">
+    <button id="chat-toggle" class="chat-bubble-toggle" aria-label="Ouvrir le chat">💬</button>
+    <div id="chat-panel" class="chat-panel hidden">
+      <div class="chat-header">
+        <h3>Discussion partagée</h3>
+        <button id="chat-close" class="icon-button">✕</button>
+      </div>
+      <div id="chat-messages" class="chat-messages"></div>
+      <form id="chat-form" class="chat-form">
+        <input id="chat-input" type="text" placeholder="Écrire un message..." autocomplete="off" required />
+        <button type="submit" class="button primary">Envoyer</button>
+      </form>
+    </div>
+  </div>
+  <script src="https://cdn.jsdelivr.net/npm/@supabase/supabase-js@2"></script>
+  <script src="script.js"></script>
+  <script>
+    if ('serviceWorker' in navigator) {
+      window.addEventListener('load', () => {
+        navigator.serviceWorker.register('sw.js').catch(err => console.error('SW:', err));
+      });
+    }
+  </script>
+</body>
+</html>
