@@ -66,6 +66,7 @@ input { width: 100%; border: 1px solid #334155; border-radius: 16px; background:
 .edit-panel input, .edit-panel select { width: 100%; border: 1px solid #334155; background: #0f172a; color: #e2e8f0; border-radius: 16px; padding: 14px 16px; }
 .shared-grid { display: grid; gap: 14px; max-width: 100%; }
 .shared-header { align-items: end; }
+.shared-corner { visibility: hidden; }
 .shared-day-label { text-align: center; padding: 8px 6px; border-radius: 14px; background: rgba(30, 41, 59, 0.7); display: grid; gap: 2px; }
 .shared-day-label strong { font-size: 0.9rem; }
 .shared-day-label span { font-size: 0.78rem; color: #94a3b8; }

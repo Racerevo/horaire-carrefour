@@ -3,11 +3,11 @@ const SUPABASE_KEY = 'sb_publishable_ikbc6Fwyajjn-o1SUTim5A_wcWCi52G';
 const supabaseClient = window.supabase.createClient(SUPABASE_URL, SUPABASE_KEY);
 
 const users = [
-  { id: 'jimmy', name: 'Jimmy', password: 'alice123', color: '#f97316' },
-  { id: 'emma', name: 'Emma', password: 'bruno123', color: '#22c55e' },
-  { id: 'celia', name: 'Célia', password: 'chloe123', color: '#38bdf8' },
-  { id: 'maud', name: 'Maud', password: 'daniel123', color: '#a855f7' },
-  { id: 'matty', name: 'Matty', password: '0285', color: '#cc1414' }
+  { id: 'jimmy', name: 'Jimmy', password: '284', color: '#f97316' },
+  { id: 'emma', name: 'Emma', password: '281', color: '#22c55e' },
+  { id: 'celia', name: 'Célia', password: '282', color: '#38bdf8' },
+  { id: 'maud', name: 'Maud', password: '283', color: '#a855f7' },
+  { id: 'matty', name: 'Matty', password: '285', color: '#cc1414' }
 ];
 const authStoreKey = 'horaire-carrefour-auth';
 const today = new Date();
