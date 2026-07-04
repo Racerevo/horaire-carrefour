@@ -100,6 +100,17 @@ function bindEvents() {
     editPanelOpen = !editPanelOpen;
     renderSchedule();
   });
+  document.querySelectorAll('.mobile-tabs .tab').forEach(tab => {
+    tab.addEventListener('click', () => {
+      const view = tab.dataset.view;
+      const workspace = document.getElementById('workspace');
+      workspace.classList.remove('view-planning', 'view-shared', 'view-employees');
+      workspace.classList.add(`view-${view}`);
+      document.querySelectorAll('.mobile-tabs .tab').forEach(t => t.classList.remove('active'));
+      tab.classList.add('active');
+      window.scrollTo({ top: 0 });
+    });
+  });
 }
 function showLogin() {
   elements.loginScreen.classList.add('active');
@@ -168,6 +179,9 @@ function renderUsers() {
       selectedUserId = user.id;
       renderUsers();
       renderSchedule();
+      if (window.matchMedia('(max-width: 860px)').matches) {
+        document.querySelector('.mobile-tabs .tab[data-view="planning"]')?.click();
+      }
     });
     item.appendChild(viewButton);
     elements.userList.appendChild(item);
@@ -194,10 +208,16 @@ function renderSchedule() {
   for (let index = 0; index < 7; index += 1) {
     const dayColumn = document.createElement('div');
     dayColumn.className = 'day-column';
+    const dayLabel = document.createElement('div');
+    dayLabel.className = 'day-mobile-label';
+    dayLabel.textContent = `${weekDays[index].label} ${weekDays[index].date}`;
+    dayColumn.appendChild(dayLabel);
     const dayEvents = events.filter(event => event.dayIndex === index).sort((a, b) => a.start.localeCompare(b.start));
     if (!dayEvents.length) {
       dayColumn.classList.add('empty');
-      dayColumn.textContent = 'Aucun événement';
+      const emptyText = document.createElement('span');
+      emptyText.textContent = 'Aucun événement';
+      dayColumn.appendChild(emptyText);
     } else {
       dayEvents.forEach(event => {
         const card = document.createElement('div');

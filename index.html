@@ -51,7 +51,7 @@
         <button id="logout-button" class="button secondary">Déconnexion</button>
       </header>
 
-      <div class="workspace">
+      <div class="workspace view-planning" id="workspace">
         <aside class="sidebar">
           <div class="panel-title">Employés</div>
           <ul id="user-list" class="user-list"></ul>
@@ -84,6 +84,11 @@
       <div class="brand-mark app-brand" aria-label="Carrefour">
         <img src="logoCarrefour.png" alt="Logo Carrefour" />
       </div>
+      <nav class="mobile-tabs">
+        <button data-view="planning" class="tab active">📅<span>Planning</span></button>
+        <button data-view="shared" class="tab">👥<span>Partagé</span></button>
+        <button data-view="employees" class="tab">☰<span>Employés</span></button>
+      </nav>
     </section>
   </div>
 

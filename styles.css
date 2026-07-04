@@ -81,12 +81,65 @@ input { width: 100%; border: 1px solid #334155; border-radius: 16px; background:
 .app-brand { bottom: 20px; left: 20px; }
 .chat-float { position: fixed; right: 24px; bottom: 24px; z-index: 60; display: grid; gap: 12px; align-items: end; }
 .chat-bubble-toggle { width: 56px; height: 56px; border-radius: 999px; border: none; background: #2563eb; color: white; font-size: 1.4rem; display: grid; place-items: center; box-shadow: 0 16px 36px rgba(15, 23, 42, 0.4); cursor: pointer; }
+.mobile-tabs { display: none; }
+.day-mobile-label { display: none; }
 @media (max-width: 1080px) {
   .workspace { grid-template-columns: 240px 1fr; }
 }
 @media (max-width: 860px) {
-  .workspace { grid-template-columns: 1fr; }
+  /* --- Structure générale --- */
+  .app-shell { padding: 0; }
+  .workspace { grid-template-columns: 1fr; padding: 16px 14px 96px; gap: 18px; min-height: auto; }
   .sidebar, .main-content { width: 100%; }
-  .chat-panel { right: 14px; bottom: 88px; width: min(95vw, 380px); }
-  .chat-float { right: 14px; bottom: 14px; }
+
+  /* --- Logo : masqué sur mobile, il gênait tout --- */
+  .brand-mark { display: none; }
+
+  /* --- Topbar compacte --- */
+  .topbar { flex-wrap: wrap; padding: 14px 16px; gap: 12px; }
+  .topbar h1 { font-size: 1.15rem; }
+  .topbar > div:first-child { flex: 1 1 100%; display: flex; align-items: baseline; justify-content: space-between; }
+  .topbar p { font-size: 0.8rem; }
+  .week-nav { flex: 1; justify-content: space-between; gap: 10px; }
+  .week-nav .small { font-size: 0.75rem; margin: 0; }
+  .icon-button { width: 40px; height: 40px; }
+  #logout-button { padding: 10px 14px; font-size: 0.85rem; }
+
+  /* --- Navigation par onglets en bas --- */
+  .mobile-tabs { display: grid; grid-template-columns: repeat(3, 1fr); position: fixed; bottom: 0; left: 0; right: 0; z-index: 70; background: rgba(15, 23, 42, 0.98); border-top: 1px solid rgba(148,163,184,0.2); padding: 8px 8px calc(8px + env(safe-area-inset-bottom)); }
+  .mobile-tabs .tab { display: grid; place-items: center; gap: 2px; border: none; background: transparent; color: #94a3b8; font-size: 1.2rem; padding: 6px 4px; border-radius: 14px; }
+  .mobile-tabs .tab span { font-size: 0.7rem; font-weight: 600; }
+  .mobile-tabs .tab.active { color: #60a5fa; background: rgba(37, 99, 235, 0.15); }
+
+  /* --- Une seule section visible à la fois selon l'onglet --- */
+  .workspace.view-planning .sidebar,
+  .workspace.view-planning .shared-panel { display: none; }
+  .workspace.view-shared .sidebar,
+  .workspace.view-shared .schedule-panel { display: none; }
+  .workspace.view-employees .shared-panel,
+  .workspace.view-employees .schedule-panel { display: none; }
+
+  /* --- Planning perso : jours empilés verticalement --- */
+  .week-days { display: none; }
+  .schedule-grid { grid-template-columns: 1fr; gap: 12px; }
+  .day-column { min-height: auto; }
+  .day-mobile-label { display: block; font-weight: 700; color: #94a3b8; font-size: 0.85rem; text-transform: uppercase; letter-spacing: 0.08em; }
+  .day-column.empty { flex-direction: row; justify-content: space-between; align-items: center; text-align: left; padding: 12px 16px; }
+  .day-column.empty .day-mobile-label { margin: 0; }
+  .schedule-panel, .shared-panel { padding: 16px; border-radius: 20px; }
+
+  /* --- Planning partagé : défilement horizontal --- */
+  .shared-grid { overflow-x: auto; -webkit-overflow-scrolling: touch; padding-bottom: 8px; }
+  .shared-row { min-width: 860px; grid-template-columns: 110px repeat(7, minmax(96px, 1fr)); }
+  .shared-row .person-name { padding: 10px 12px; font-size: 0.85rem; }
+  .shared-cell { min-height: 90px; padding: 10px; }
+  .shared-entry { font-size: 0.78rem; padding: 8px 10px; }
+  .shared-summary { font-size: 0.85rem; }
+
+  /* --- Modification : panneau plein écran --- */
+  .edit-panel:not(.hidden) { position: fixed; inset: 0; z-index: 80; margin: 0; border-radius: 0; overflow-y: auto; padding: 24px 20px calc(24px + env(safe-area-inset-bottom)); background: #0f172a; }
+
+  /* --- Chat : au-dessus de la barre d'onglets --- */
+  .chat-panel { right: 12px; bottom: 160px; width: min(94vw, 380px); max-height: 60vh; }
+  .chat-float { right: 14px; bottom: 92px; }
 }
