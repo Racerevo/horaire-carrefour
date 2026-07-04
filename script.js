@@ -3,11 +3,11 @@ const SUPABASE_KEY = 'sb_publishable_ikbc6Fwyajjn-o1SUTim5A_wcWCi52G';
 const supabaseClient = window.supabase.createClient(SUPABASE_URL, SUPABASE_KEY);
 
 const users = [
-  { id: 'jimmy', name: 'Jimmy', password: '284', color: '#f97316' },
-  { id: 'emma', name: 'Emma', password: '286', color: '#22c55e' },
-  { id: 'celia', name: 'Célia', password: '282', color: '#38bdf8' },
-  { id: 'maud', name: 'Maud', password: '283', color: '#a855f7' },
-  { id: 'matty', name: 'Matty', password: '285', color: '#cc1414' }
+  { id: 'jimmy', name: 'Jimmy', password: 'alice123', color: '#f97316' },
+  { id: 'emma', name: 'Emma', password: 'bruno123', color: '#22c55e' },
+  { id: 'celia', name: 'Célia', password: 'chloe123', color: '#38bdf8' },
+  { id: 'maud', name: 'Maud', password: 'daniel123', color: '#a855f7' },
+  { id: 'matty', name: 'Matty', password: '0285', color: '#cc1414' }
 ];
 const authStoreKey = 'horaire-carrefour-auth';
 const today = new Date();
@@ -371,6 +371,19 @@ function renderSharedSchedule() {
   elements.sharedGrid.innerHTML = '';
   const weekKey = getWeekKey(currentWeek);
   const totalsByDay = Array(7).fill(0);
+  // Ligne d'en-tête avec les jours
+  const headerRow = document.createElement('div');
+  headerRow.className = 'shared-row shared-header';
+  const corner = document.createElement('div');
+  corner.className = 'shared-corner';
+  headerRow.appendChild(corner);
+  weekDays.forEach(day => {
+    const cell = document.createElement('div');
+    cell.className = 'shared-day-label';
+    cell.innerHTML = `<strong>${day.label}</strong><span>${day.date}</span>`;
+    headerRow.appendChild(cell);
+  });
+  elements.sharedGrid.appendChild(headerRow);
   users.forEach(user => {
     const row = document.createElement('div');
     row.className = 'shared-row';
@@ -404,7 +417,10 @@ function renderSharedSchedule() {
     elements.sharedGrid.appendChild(row);
   });
   elements.overlapSummary.innerHTML = `
-    <strong>Répartition de la semaine :</strong> ${totalsByDay.map((count, index) => `${weekDays[index].label}: ${count} employé(s) actif(s)`).join(' · ')}
+    <p class="summary-caption">Employés actifs par jour</p>
+    <div class="summary-chips">
+      ${totalsByDay.map((count, index) => `<span class="summary-chip"><strong>${weekDays[index].label}</strong>${count}</span>`).join('')}
+    </div>
   `;
 }
 function toggleChat() {
@@ -466,6 +482,9 @@ async function removeEvent(eventId) {
 
 // --- Supabase: chat ---
 async function loadChat() {
+  // Suppression automatique des messages de plus de 48h
+  const cutoff = new Date(Date.now() - 48 * 60 * 60 * 1000).toISOString();
+  await supabaseClient.from('messages').delete().lt('created_at', cutoff);
   const { data: rows, error } = await supabaseClient
     .from('messages')
     .select('*')
