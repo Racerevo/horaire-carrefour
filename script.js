@@ -4,7 +4,7 @@ const supabaseClient = window.supabase.createClient(SUPABASE_URL, SUPABASE_KEY);
 
 const users = [
   { id: 'jimmy', name: 'Jimmy', password: '284', color: '#f97316' },
-  { id: 'emma', name: 'Emma', password: '281', color: '#22c55e' },
+  { id: 'emma', name: 'Emma', password: '286', color: '#22c55e' },
   { id: 'celia', name: 'Célia', password: '282', color: '#38bdf8' },
   { id: 'maud', name: 'Maud', password: '283', color: '#a855f7' },
   { id: 'matty', name: 'Matty', password: '285', color: '#cc1414' }
