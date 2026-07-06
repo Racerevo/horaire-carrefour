@@ -1,5 +1,6 @@
 const SUPABASE_URL = 'https://xbicuvlltztukvkibzxe.supabase.co';
 const SUPABASE_KEY = 'sb_publishable_ikbc6Fwyajjn-o1SUTim5A_wcWCi52G';
+const VAPID_PUBLIC_KEY = 'BI7D-mWAaeU3XGX227WG1XWBxQvlF1u91keFpBEpUIaIEkFqrg3bqNkPxdeuyQ4kEOzBPOmMIx4Ljexj4WCN2Xs';
 const supabaseClient = window.supabase.createClient(SUPABASE_URL, SUPABASE_KEY);
 
 const users = [
@@ -127,6 +128,35 @@ function showApp() {
   renderSchedule();
   renderSharedSchedule();
   renderChat();
+  setupPushNotifications();
+}
+
+async function setupPushNotifications() {
+  if (!('serviceWorker' in navigator) || !('PushManager' in window) || !('Notification' in window)) return;
+  try {
+    const permission = await Notification.requestPermission();
+    if (permission !== 'granted') return;
+    const registration = await navigator.serviceWorker.ready;
+    let subscription = await registration.pushManager.getSubscription();
+    if (!subscription) {
+      subscription = await registration.pushManager.subscribe({
+        userVisibleOnly: true,
+        applicationServerKey: urlBase64ToUint8Array(VAPID_PUBLIC_KEY)
+      });
+    }
+    await supabaseClient.from('push_subscriptions').upsert(
+      { user_id: authUser.id, subscription: subscription.toJSON() },
+      { onConflict: 'endpoint' }
+    );
+  } catch (err) {
+    console.error('Notifications push :', err);
+  }
+}
+function urlBase64ToUint8Array(base64String) {
+  const padding = '='.repeat((4 - base64String.length % 4) % 4);
+  const base64 = (base64String + padding).replace(/-/g, '+').replace(/_/g, '/');
+  const rawData = window.atob(base64);
+  return Uint8Array.from([...rawData].map(char => char.charCodeAt(0)));
 }
 function handleLogin(event) {
   event.preventDefault();
@@ -424,7 +454,11 @@ function renderSharedSchedule() {
   `;
 }
 function toggleChat() {
-  elements.chatPanel.classList.toggle('hidden');
+  const nowHidden = elements.chatPanel.classList.toggle('hidden');
+  document.body.classList.toggle('chat-open', !nowHidden);
+  if (!nowHidden) {
+    elements.chatMessages.scrollTop = elements.chatMessages.scrollHeight;
+  }
 }
 async function handleChatSubmit(event) {
   event.preventDefault();
@@ -439,10 +473,25 @@ function renderChat() {
   chatMessages.slice(-40).forEach(item => {
     const bubble = document.createElement('div');
     bubble.className = 'chat-bubble';
-    bubble.innerHTML = `<strong>${item.author}</strong><span>${item.message}</span><small style="color:#94a3b8;">${formatTime(item.stamp)}</small>`;
+    const author = document.createElement('strong');
+    author.textContent = item.author;
+    const text = document.createElement('p');
+    text.className = 'chat-text';
+    text.textContent = item.message;
+    const stamp = document.createElement('small');
+    stamp.className = 'chat-stamp';
+    stamp.textContent = formatStamp(item.stamp);
+    bubble.appendChild(author);
+    bubble.appendChild(text);
+    bubble.appendChild(stamp);
     elements.chatMessages.appendChild(bubble);
   });
   elements.chatMessages.scrollTop = elements.chatMessages.scrollHeight;
+}
+function formatStamp(iso) {
+  const d = new Date(iso);
+  const days = ['Dim', 'Lun', 'Mar', 'Mer', 'Jeu', 'Ven', 'Sam'];
+  return `${days[d.getDay()]} ${formatDate(d)} · ${formatTime(iso)}`;
 }
 
 // --- Supabase: emploi du temps ---

@@ -1,4 +1,4 @@
-const CACHE_NAME = 'horaire-carrefour-v4';
+const CACHE_NAME = 'horaire-carrefour-v6';
 const APP_SHELL = [
   './',
   './index.html',
@@ -43,4 +43,24 @@ self.addEventListener('fetch', event => {
       })
       .catch(() => caches.match(event.request))
   );
+});
+
+// Réception d'une notification push envoyée par le serveur
+self.addEventListener('push', event => {
+  let data = {};
+  try { data = event.data ? event.data.json() : {}; } catch (e) { data = { body: event.data?.text() }; }
+  event.waitUntil(
+    self.registration.showNotification(data.title || 'Horaire Carrefour', {
+      body: data.body || '',
+      icon: './icon-192.png',
+      badge: './icon-192.png',
+      vibrate: [200, 100, 200]
+    })
+  );
+});
+
+// Clic sur la notification : on ouvre l'app
+self.addEventListener('notificationclick', event => {
+  event.notification.close();
+  event.waitUntil(clients.openWindow('./'));
 });
