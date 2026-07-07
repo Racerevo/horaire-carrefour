@@ -10,7 +10,8 @@ const users = [
   { id: 'maud', name: 'Maud', password: '283', color: '#a855f7' },
   { id: 'matty', name: 'Matty', password: '285', color: '#cc1414' },
   { id: 'shanice', name: 'Shanice', password: '276', color: '#101ed6' },
-  { id: 'morgane', name: 'Morgane', password: '280', color: '#e730cf' }
+  { id: 'morgane', name: 'Morgane', password: '280', color: '#e730cf' },
+  { id: 'dounia', name: 'Dounia', password: '169', color: '#19e412' },
 ];
 const authStoreKey = 'horaire-carrefour-auth';
 const today = new Date();
