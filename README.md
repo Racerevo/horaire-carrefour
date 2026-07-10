@@ -2,6 +2,16 @@
 
 Application web (PWA) de planning partagé pour une équipe d'employés Carrefour : chacun consulte et modifie son emploi du temps hebdomadaire, visualise les horaires de l'équipe en un coup d'œil, et discute via un chat intégré. Installable sur mobile et notifie les employés par push.
 
+## Aperçu
+
+| Connexion | Emploi du temps personnel |
+|---|---|
+| ![Écran de connexion](Photo/connexion.png) | ![Emploi du temps personnel](Photo/PlaningPerso.png) |
+
+| Vue partagée | Chat |
+|---|---|
+| ![Emploi du temps partagé](Photo/planingPartagée.png) | ![Chat](Photo/Chat.png) |
+
 ## Fonctionnalités
 
 - **Connexion par employé** : identifiant = prénom, mot de passe attribué individuellement.
