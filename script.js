@@ -975,13 +975,16 @@ async function analyserPhotoPlanning(event) {
       }
     }
 
-    importResultat = meilleurResultat;
-
-    if (!importResultat || !importResultat.jours.some(j => j.repos || j.creneaux.length)) {
+    if (!meilleurResultat || meilleurResultat.joursTrouves.length === 0) {
       alert("Aucun horaire reconnu sur cette photo. Reprends-la bien à plat, avec un bon éclairage et le ticket entier dans le cadre.");
       fermerImport();
       return;
     }
+
+    importResultat = {
+      ...meilleurResultat,
+      jours: completerJoursPourAffichage(meilleurResultat.joursTrouves)
+    };
     afficherVerification();
   } catch (err) {
     console.error('Import photo :', err);
@@ -1094,23 +1097,35 @@ function parsePlanningOcr(texte) {
     jours.push(jour);
   }
 
-  // Complète les jours manquants (affichés vides dans la vérification)
-  for (let i = 0; i < 7; i += 1) {
-    if (!jours.some(j => j.dayIndex === i)) jours.push({ dayIndex: i, repos: true, creneaux: [] });
-  }
   jours.sort((a, b) => a.dayIndex - b.dayIndex);
 
-  if (jours.filter(j => j.creneaux.length || j.repos).length < 7) {
-    alertes.push('Certains jours n\u2019ont pas été reconnus : vérifie que rien ne manque.');
+  if (jours.length < 7) {
+    alertes.push(`${jours.length} jour(s) reconnu(s) sur 7 : les jours manquants sont marqués "à vérifier" ci-dessous, pas devinés.`);
   }
 
-  return { weekKey, lundiImport, jours, alertes, periodeTrouvee: !!mPeriode };
+  // IMPORTANT : on ne renvoie QUE les jours réellement lus sur la photo.
+  // Un jour absent d'ici ne doit jamais être supposé "Repos" par défaut :
+  // le remplissage (avec un état "à vérifier", pas "Repos") se fait à l'affichage.
+  return { weekKey, lundiImport, joursTrouves: jours, alertes, periodeTrouvee: !!mPeriode };
 }
 
-// Score de confiance d'une lecture : période trouvée + nombre de jours renseignés
+// Score de confiance d'une lecture : période trouvée + nombre de jours EFFECTIVEMENT lus
+// (ne compte que les jours réellement trouvés dans le texte OCR, jamais des valeurs
+// par défaut, sinon un mauvais essai pourrait sembler aussi fiable qu'un bon)
 function evaluerConfianceOcr(resultat) {
-  const joursRenseignes = resultat.jours.filter(j => j.repos || j.creneaux.length > 0).length;
-  return joursRenseignes + (resultat.periodeTrouvee ? 10 : 0);
+  return resultat.joursTrouves.length + (resultat.periodeTrouvee ? 10 : 0);
+}
+
+// Construit les 7 jours pour l'écran de vérification. Un jour non lu sur la
+// photo devient "à vérifier" (repos: false, creneaux: []) — jamais "Repos" :
+// on ne veut jamais affirmer un repos que l'OCR n'a pas réellement lu.
+function completerJoursPourAffichage(joursTrouves) {
+  const parIndex = new Map(joursTrouves.map(j => [j.dayIndex, j]));
+  const complet = [];
+  for (let i = 0; i < 7; i += 1) {
+    complet.push(parIndex.get(i) || { dayIndex: i, repos: false, creneaux: [] });
+  }
+  return complet;
 }
 
 // Charge un fichier image dans un <img> pour pouvoir le faire pivoter sur un canvas
@@ -1174,11 +1189,20 @@ function renderJoursImport() {
     entete.appendChild(titre);
     bloc.appendChild(entete);
 
-    if (jour.creneaux.length === 0) {
+    const nonLu = !jour.repos && jour.creneaux.length === 0;
+
+    if (jour.repos) {
       const repos = document.createElement('p');
       repos.className = 'import-repos';
       repos.textContent = 'Repos';
       bloc.appendChild(repos);
+    }
+
+    if (nonLu) {
+      const avertissement = document.createElement('p');
+      avertissement.className = 'import-non-lu';
+      avertissement.textContent = '⚠️ Non lu sur la photo — vérifie ce jour avant de valider';
+      bloc.appendChild(avertissement);
     }
 
     jour.creneaux.forEach((creneau, iC) => {
@@ -1223,17 +1247,45 @@ function renderJoursImport() {
       bloc.appendChild(ligne);
     });
 
-    const ajouter = document.createElement('button');
-    ajouter.type = 'button';
-    ajouter.className = 'import-ajouter';
-    ajouter.textContent = '+ Ajouter un créneau';
-    ajouter.addEventListener('click', () => {
-      const dernier = jour.creneaux[jour.creneaux.length - 1];
-      jour.creneaux.push({ start: dernier ? dernier.end : '09:00', end: dernier ? '19:00' : '12:00', title: 'Caisse' });
-      renderJoursImport();
-    });
-    bloc.appendChild(ajouter);
+    const actions = document.createElement('div');
+    actions.className = 'import-jour-actions';
 
+    if (jour.repos) {
+      const ajouterHoraires = document.createElement('button');
+      ajouterHoraires.type = 'button';
+      ajouterHoraires.className = 'import-ajouter';
+      ajouterHoraires.textContent = '+ Ajouter des horaires';
+      ajouterHoraires.addEventListener('click', () => {
+        jour.repos = false;
+        jour.creneaux.push({ start: '09:00', end: '12:00', title: 'Caisse' });
+        renderJoursImport();
+      });
+      actions.appendChild(ajouterHoraires);
+    } else {
+      const ajouter = document.createElement('button');
+      ajouter.type = 'button';
+      ajouter.className = 'import-ajouter';
+      ajouter.textContent = '+ Ajouter un créneau';
+      ajouter.addEventListener('click', () => {
+        const dernier = jour.creneaux[jour.creneaux.length - 1];
+        jour.creneaux.push({ start: dernier ? dernier.end : '09:00', end: dernier ? '19:00' : '12:00', title: 'Caisse' });
+        renderJoursImport();
+      });
+      actions.appendChild(ajouter);
+
+      const marquerRepos = document.createElement('button');
+      marquerRepos.type = 'button';
+      marquerRepos.className = 'import-marquer-repos';
+      marquerRepos.textContent = 'Marquer repos';
+      marquerRepos.addEventListener('click', () => {
+        jour.repos = true;
+        jour.creneaux = [];
+        renderJoursImport();
+      });
+      actions.appendChild(marquerRepos);
+    }
+
+    bloc.appendChild(actions);
     elements.importJours.appendChild(bloc);
   });
 }
@@ -1242,6 +1294,12 @@ function renderJoursImport() {
 
 async function validerImport() {
   const { weekKey, lundiImport, jours } = importResultat;
+
+  const nonResolus = jours.filter(j => !j.repos && j.creneaux.length === 0);
+  if (nonResolus.length > 0) {
+    alert(`${nonResolus.length} jour(s) marqué(s) "non lu" : indique "Marquer repos" ou ajoute les horaires avant de valider.`);
+    return;
+  }
 
   const invalides = jours.flatMap(j => j.creneaux.filter(c => !c.start || !c.end || c.start >= c.end));
   if (invalides.length > 0) {
