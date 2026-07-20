@@ -917,22 +917,67 @@ async function analyserPhotoPlanning(event) {
   if (!fichier) return;
 
   ouvrirImport('analyse');
-  elements.importPreview.src = URL.createObjectURL(fichier);
-  majProgression(0, 'Lecture des horaires…');
+  const previewUrl = URL.createObjectURL(fichier);
+  elements.importPreview.src = previewUrl;
+  majProgression(0, 'Préparation de la photo…');
+
+  // Charge l'image pour pouvoir tester plusieurs orientations si besoin.
+  // Si le format n'est pas décodable par le navigateur (ex: HEIC hors Safari),
+  // on retombe sur une seule tentative avec le fichier original.
+  let image = null;
+  try {
+    image = await chargerImagePourRotation(previewUrl);
+  } catch {
+    image = null;
+  }
+
+  const orientations = image ? [0, 90, 270, 180] : [0];
+  let meilleurResultat = null;
+  let meilleurScore = -1;
 
   try {
-    const { data } = await Tesseract.recognize(fichier, 'fra', {
-      logger: m => {
-        if (m.status === 'recognizing text') {
-          majProgression(Math.round(m.progress * 100), `Lecture des horaires… ${Math.round(m.progress * 100)}%`);
-        } else if (m.status === 'loading language traineddata') {
-          majProgression(0, 'Chargement du moteur de lecture…');
-        }
-      }
-    });
+    for (let i = 0; i < orientations.length; i += 1) {
+      const degres = orientations[i];
+      majProgression(0, i === 0
+        ? 'Lecture des horaires…'
+        : `Photo de travers ? Nouvel essai (${i + 1}/${orientations.length})…`);
 
-    importResultat = parsePlanningOcr(data.text);
-    if (!importResultat.jours.some(j => j.repos || j.creneaux.length)) {
+      const source = image ? rotateImageClockwise(image, degres) : fichier;
+      let texte;
+      try {
+        const { data } = await Tesseract.recognize(source, 'fra', {
+          logger: m => {
+            if (m.status === 'recognizing text') {
+              const pct = Math.round(m.progress * 100);
+              majProgression(pct, i === 0
+                ? `Lecture des horaires… ${pct}%`
+                : `Nouvel essai (${i + 1}/${orientations.length})… ${pct}%`);
+            } else if (m.status === 'loading language traineddata') {
+              majProgression(0, 'Chargement du moteur de lecture…');
+            }
+          }
+        });
+        texte = data.text;
+      } catch (err) {
+        console.error(`OCR échoué (orientation ${degres}°) :`, err);
+        continue;
+      }
+
+      const resultat = parsePlanningOcr(texte);
+      const score = evaluerConfianceOcr(resultat);
+      if (score > meilleurScore) {
+        meilleurScore = score;
+        meilleurResultat = resultat;
+      }
+      // Confiant : période trouvée + au moins 4 jours renseignés -> inutile de continuer
+      if (resultat.periodeTrouvee && resultat.jours.filter(j => j.repos || j.creneaux.length).length >= 4) {
+        break;
+      }
+    }
+
+    importResultat = meilleurResultat;
+
+    if (!importResultat || !importResultat.jours.some(j => j.repos || j.creneaux.length)) {
       alert("Aucun horaire reconnu sur cette photo. Reprends-la bien à plat, avec un bon éclairage et le ticket entier dans le cadre.");
       fermerImport();
       return;
@@ -1059,7 +1104,42 @@ function parsePlanningOcr(texte) {
     alertes.push('Certains jours n\u2019ont pas été reconnus : vérifie que rien ne manque.');
   }
 
-  return { weekKey, lundiImport, jours, alertes };
+  return { weekKey, lundiImport, jours, alertes, periodeTrouvee: !!mPeriode };
+}
+
+// Score de confiance d'une lecture : période trouvée + nombre de jours renseignés
+function evaluerConfianceOcr(resultat) {
+  const joursRenseignes = resultat.jours.filter(j => j.repos || j.creneaux.length > 0).length;
+  return joursRenseignes + (resultat.periodeTrouvee ? 10 : 0);
+}
+
+// Charge un fichier image dans un <img> pour pouvoir le faire pivoter sur un canvas
+function chargerImagePourRotation(url) {
+  return new Promise((resolve, reject) => {
+    const img = new Image();
+    img.onload = () => resolve(img);
+    img.onerror = reject;
+    img.src = url;
+  });
+}
+
+// Fait pivoter une image (clockwise) sur un canvas, utilisable directement par Tesseract
+function rotateImageClockwise(img, degres) {
+  const canvas = document.createElement('canvas');
+  const ctx = canvas.getContext('2d');
+  const largeur = img.naturalWidth || img.width;
+  const hauteur = img.naturalHeight || img.height;
+  if (degres % 180 !== 0) {
+    canvas.width = hauteur;
+    canvas.height = largeur;
+  } else {
+    canvas.width = largeur;
+    canvas.height = hauteur;
+  }
+  ctx.translate(canvas.width / 2, canvas.height / 2);
+  ctx.rotate((degres * Math.PI) / 180);
+  ctx.drawImage(img, -largeur / 2, -hauteur / 2);
+  return canvas;
 }
 
 // ---------- Écran de vérification ----------
