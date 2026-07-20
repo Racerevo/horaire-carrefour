@@ -1084,7 +1084,11 @@ function parsePlanningOcr(texte) {
   // recherche élargie, sinon des fragments comme "au 26/07/2026" pourraient
   // eux-mêmes ressembler à un faux jour.
   const regexJour = /^.{0,6}?([A-Za-zÀ-ÿ]{1,3})\s+(\d{1,2})[\s/]+(.*)/;
-  const regexCreneau = /(\d{1,2}:\d{2})\s*[-–—]\s*(\d{1,2}:\d{2})\s*([A-ZÀ-Ü][A-ZÀ-Ü0-9]{1,15})?/g;
+  // Le code du poste (CAI, VME, PANIERS...) est composé UNIQUEMENT de lettres :
+  // s'il tolérait aussi les chiffres, un poste collé sans espace au créneau
+  // suivant ("CAI16:00-19:15") avalerait le "16" qui appartient en fait au
+  // second créneau, et le ferait disparaître entièrement.
+  const regexCreneau = /(\d{1,2}:\d{2})\s*[-–—]\s*(\d{1,2}:\d{2})\s*([A-ZÀ-Ü]{2,15})?/g;
 
   let ordreM = 0; // dernier recours seulement, si le numéro ne permet pas de trancher
   for (const brute of texte.split('\n')) {
