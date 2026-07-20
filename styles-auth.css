@@ -1,0 +1,104 @@
+/* styles-auth.css — Phase 1 : connexion/inscription, écran d'attente,
+   panneau admin. Chargé APRÈS styles.css, même thème sombre. */
+
+/* Onglets Connexion / Créer un compte */
+.auth-tabs {
+  display: flex;
+  background: #0f172a;
+  border: 1px solid #334155;
+  border-radius: 16px;
+  padding: 4px;
+  gap: 4px;
+}
+.auth-tab {
+  flex: 1;
+  border: none;
+  background: transparent;
+  color: #94a3b8;
+  font-weight: 600;
+  padding: 12px 8px;
+  border-radius: 12px;
+}
+.auth-tab.active {
+  background: #1f2937;
+  color: #60a5fa;
+}
+
+.auth-note {
+  margin: 0;
+  color: #94a3b8;
+  font-size: 0.85rem;
+  line-height: 1.5;
+}
+
+/* Écran en attente */
+.pending-card {
+  text-align: center;
+  justify-items: center;
+}
+.pending-icon { font-size: 2.8rem; }
+.pending-pulse {
+  display: flex;
+  gap: 8px;
+  justify-content: center;
+}
+.pending-pulse span {
+  width: 10px;
+  height: 10px;
+  border-radius: 999px;
+  background: #2563eb;
+  animation: pending-pulse 1.2s infinite ease-in-out;
+}
+.pending-pulse span:nth-child(2) { animation-delay: 0.2s; }
+.pending-pulse span:nth-child(3) { animation-delay: 0.4s; }
+@keyframes pending-pulse {
+  0%, 100% { opacity: 0.25; transform: scale(0.85); }
+  50%      { opacity: 1;    transform: scale(1); }
+}
+@media (prefers-reduced-motion: reduce) {
+  .pending-pulse span { animation: none; opacity: 0.7; }
+}
+
+/* Panneau admin dans la sidebar */
+.admin-badge {
+  display: inline-grid;
+  place-items: center;
+  min-width: 22px;
+  height: 22px;
+  padding: 0 6px;
+  border-radius: 999px;
+  background: #dc2626;
+  color: white;
+  font-size: 0.75rem;
+  font-weight: 700;
+  letter-spacing: 0;
+}
+.demande-item {
+  display: grid;
+  gap: 10px;
+  padding: 14px 16px;
+  border-radius: 20px;
+  background: #0f172a;
+  border: 1px solid rgba(96, 165, 250, 0.35);
+}
+.demande-item strong { display: block; }
+.demande-item small { color: #94a3b8; word-break: break-all; }
+.demande-actions { display: flex; gap: 8px; }
+.demande-actions button {
+  flex: 1;
+  border: none;
+  border-radius: 14px;
+  padding: 10px;
+  font-weight: 700;
+}
+.demande-accepter { background: #16a34a; color: white; }
+.demande-refuser { background: #1f2937; color: #fca5a5; }
+
+/* Vue partagée sans couleurs par personne : style bleu uniforme */
+.shared-entry {
+  background: rgba(37, 99, 235, 0.18);
+  border: 1px solid rgba(37, 99, 235, 0.35);
+}
+.shared-row .person-name {
+  border: 1px solid rgba(148, 163, 184, 0.25);
+}

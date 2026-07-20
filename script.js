@@ -1,48 +1,73 @@
+// ============================================================
+// HORAIRE CARREFOUR — script.js (Phase 1 : Supabase Auth)
+// Changements vs l'ancienne version :
+//   - Plus de mots de passe en clair dans le code (faille corrigée)
+//   - Inscription en autonomie (email + mdp + code équipe)
+//   - Validation admin obligatoire avant d'accéder à l'app
+//   - Liste des employés chargée depuis la table profiles
+// Tout le reste (planning, vue partagée, chat, push) est conservé.
+// ============================================================
+
 const SUPABASE_URL = 'https://xbicuvlltztukvkibzxe.supabase.co';
 const SUPABASE_KEY = 'sb_publishable_ikbc6Fwyajjn-o1SUTim5A_wcWCi52G';
 const VAPID_PUBLIC_KEY = 'BI7D-mWAaeU3XGX227WG1XWBxQvlF1u91keFpBEpUIaIEkFqrg3bqNkPxdeuyQ4kEOzBPOmMIx4Ljexj4WCN2Xs';
+const CODE_EQUIPE = 'CARREFOUR2026'; // 🔑 à donner oralement aux collègues
+
 const supabaseClient = window.supabase.createClient(SUPABASE_URL, SUPABASE_KEY);
 
-const users = [
-  { id: 'jimmy', name: 'Jimmy', password: '284', color: '#f97316' },
-  { id: 'emma', name: 'Emma', password: '281', color: '#22c55e' },
-  { id: 'celia', name: 'Célia', password: '282', color: '#38bdf8' },
-  { id: 'maud', name: 'Maud', password: '283', color: '#a855f7' },
-  { id: 'matty', name: 'Matty', password: '285', color: '#cc1414' },
-  { id: 'shanice', name: 'Shanice', password: '276', color: '#101ed6' },
-  { id: 'morgane', name: 'Morgane', password: '280', color: '#e730cf' },
-  { id: 'dounia', name: 'Dounia', password: '169', color: '#19e412' },
-];
-const authStoreKey = 'horaire-carrefour-auth';
 const today = new Date();
 const mondayStart = getMonday(today);
 let currentWeek = loadWeekStart() || mondayStart;
-let authUser = null;
+
+let authUser = null;      // { id (uuid), name, color } — même forme qu'avant
+let monProfil = null;     // ligne complète de la table profiles
+let profils = [];         // employés approuvés (remplace l'ancien tableau users)
 let selectedUserId = null;
 let editPanelOpen = false;
 let data = {};
 let chatMessages = [];
+let authMode = 'connexion'; // 'connexion' | 'inscription'
+let canalProfilPerso = null;
+
 const elements = {
   loginScreen: document.getElementById('login-screen'),
+  pendingScreen: document.getElementById('pending-screen'),
   appScreen: document.getElementById('app-screen'),
   loginForm: document.getElementById('login-form'),
-  loginName: document.getElementById('login-name'),
+  tabLogin: document.getElementById('tab-login'),
+  tabSignup: document.getElementById('tab-signup'),
+  fieldName: document.getElementById('field-name'),
+  fieldCode: document.getElementById('field-code'),
+  signupName: document.getElementById('signup-name'),
+  signupCode: document.getElementById('signup-code'),
+  loginEmail: document.getElementById('login-email'),
   loginPassword: document.getElementById('login-password'),
   loginError: document.getElementById('login-error'),
+  signupNote: document.getElementById('signup-note'),
+  authSubmit: document.getElementById('auth-submit'),
+  pendingIcon: document.getElementById('pending-icon'),
+  pendingTitle: document.getElementById('pending-title'),
+  pendingText: document.getElementById('pending-text'),
+  pendingPulse: document.getElementById('pending-pulse'),
+  pendingLogout: document.getElementById('pending-logout'),
   logoutButton: document.getElementById('logout-button'),
   welcomeText: document.getElementById('welcome-text'),
   weekLabel: document.getElementById('week-label'),
   prevWeek: document.getElementById('prev-week'),
   nextWeek: document.getElementById('next-week'),
   userList: document.getElementById('user-list'),
+  adminBlock: document.getElementById('admin-block'),
+  adminDemandes: document.getElementById('admin-demandes'),
+  adminCount: document.getElementById('admin-count'),
+  enablePush: document.getElementById('enable-push'),
   scheduleTitle: document.getElementById('schedule-title'),
-  userColorDot: document.getElementById('user-color-dot'),
   weekDays: document.getElementById('week-days'),
   scheduleGrid: document.getElementById('schedule-grid'),
   editPanel: document.getElementById('edit-panel'),
   toggleEditPanel: document.getElementById('toggle-edit-panel'),
   sharedGrid: document.getElementById('shared-grid'),
   overlapSummary: document.getElementById('overlap-summary'),
+  chatFloat: document.getElementById('chat-float'),
   chatToggle: document.getElementById('chat-toggle'),
   chatPanel: document.getElementById('chat-panel'),
   chatClose: document.getElementById('chat-close'),
@@ -51,22 +76,90 @@ const elements = {
   chatInput: document.getElementById('chat-input')
 };
 
+// ============================================================
+// INITIALISATION & ROUTAGE (connexion → attente → app)
+// ============================================================
+
 async function initialize() {
   bindEvents();
-  const storedAuth = localStorage.getItem(authStoreKey);
-  if (storedAuth) {
-    const saved = JSON.parse(storedAuth);
-    authUser = users.find(user => user.id === saved.id) || null;
-    selectedUserId = authUser?.id || null;
+
+  const { data: { session } } = await supabaseClient.auth.getSession();
+  await router(session);
+
+  supabaseClient.auth.onAuthStateChange((_event, session) => {
+    router(session);
+  });
+}
+
+async function router(session) {
+  if (!session) {
+    authUser = null;
+    monProfil = null;
+    showLogin();
+    return;
   }
+
+  monProfil = await chargerMonProfil(session.user.id);
+
+  if (!monProfil || monProfil.statut !== 'approuve') {
+    showPending();
+    ecouterMonProfil(session.user.id); // bascule automatique quand accepté
+    return;
+  }
+
+  authUser = {
+    id: monProfil.id,
+    name: monProfil.nom || monProfil.email
+  };
+  selectedUserId = selectedUserId || authUser.id;
+
+  profils = await chargerProfils();
   data = await loadData();
   chatMessages = await loadChat();
-  if (authUser) {
-    showApp();
-  } else {
-    showLogin();
-  }
+  showApp();
   setupRealtime();
+}
+
+async function chargerMonProfil(userId) {
+  const { data: profil, error } = await supabaseClient
+    .from('profiles')
+    .select('*')
+    .eq('id', userId)
+    .single();
+  if (error) { console.error(error); return null; }
+  return profil;
+}
+
+async function chargerProfils() {
+  const { data: rows, error } = await supabaseClient
+    .from('profiles')
+    .select('id, nom, email, role')
+    .eq('statut', 'approuve')
+    .order('nom');
+  if (error) { console.error(error); return []; }
+  return rows.map(p => ({
+    id: p.id,
+    name: p.nom || p.email,
+    role: p.role
+  }));
+}
+
+// Écoute MON profil : dès que l'admin accepte, l'app s'ouvre toute seule
+function ecouterMonProfil(userId) {
+  if (canalProfilPerso) supabaseClient.removeChannel(canalProfilPerso);
+  canalProfilPerso = supabaseClient
+    .channel(`profil-${userId}`)
+    .on('postgres_changes',
+      { event: 'UPDATE', schema: 'public', table: 'profiles', filter: `id=eq.${userId}` },
+      payload => {
+        monProfil = payload.new;
+        if (monProfil.statut === 'approuve') {
+          supabaseClient.auth.getSession().then(({ data: { session } }) => router(session));
+        } else {
+          showPending();
+        }
+      })
+    .subscribe();
 }
 
 function setupRealtime() {
@@ -90,11 +183,31 @@ function setupRealtime() {
       }
     })
     .subscribe();
+
+  // Nouveaux profils (demandes) + validations → met à jour listes et badge admin
+  supabaseClient
+    .channel('profiles-changes')
+    .on('postgres_changes', { event: '*', schema: 'public', table: 'profiles' }, async () => {
+      if (!authUser) return;
+      profils = await chargerProfils();
+      renderUsers();
+      renderSharedSchedule();
+      if (monProfil?.role === 'admin') renderDemandes();
+    })
+    .subscribe();
 }
 
+// ============================================================
+// ÉVÉNEMENTS UI
+// ============================================================
+
 function bindEvents() {
-  elements.loginForm.addEventListener('submit', handleLogin);
+  elements.loginForm.addEventListener('submit', handleAuthSubmit);
+  elements.tabLogin.addEventListener('click', () => setAuthMode('connexion'));
+  elements.tabSignup.addEventListener('click', () => setAuthMode('inscription'));
   elements.logoutButton.addEventListener('click', handleLogout);
+  elements.pendingLogout.addEventListener('click', handleLogout);
+  elements.enablePush.addEventListener('click', activerPush);
   elements.prevWeek.addEventListener('click', () => changeWeek(-1));
   elements.nextWeek.addEventListener('click', () => changeWeek(1));
   elements.chatToggle.addEventListener('click', toggleChat);
@@ -116,29 +229,234 @@ function bindEvents() {
     });
   });
 }
-function showLogin() {
-  elements.loginScreen.classList.add('active');
-  elements.appScreen.classList.remove('active');
+
+function setAuthMode(mode) {
+  authMode = mode;
+  const inscription = mode === 'inscription';
+  elements.tabLogin.classList.toggle('active', !inscription);
+  elements.tabSignup.classList.toggle('active', inscription);
+  elements.fieldName.classList.toggle('hidden', !inscription);
+  elements.fieldCode.classList.toggle('hidden', !inscription);
+  elements.signupNote.classList.toggle('hidden', !inscription);
+  elements.authSubmit.textContent = inscription ? 'Envoyer ma demande' : 'Se connecter';
   elements.loginError.classList.add('hidden');
 }
+
+// ============================================================
+// AUTHENTIFICATION (Supabase Auth)
+// ============================================================
+
+// Convertit l'identifiant saisi en email synthétique pour Supabase Auth.
+// "Emma Dupont" -> "emma.dupont@equipe.local" (minuscules, sans accents)
+function identifiantVersEmail(identifiant) {
+  const propre = identifiant
+    .toLowerCase()
+    .normalize('NFD').replace(/[\u0300-\u036f]/g, '') // enlève les accents
+    .replace(/\s+/g, '.')                                // espaces -> points
+    .replace(/[^a-z0-9._-]/g, '');                       // caractères invalides
+  return `${propre}@equipe.local`;
+}
+
+async function handleAuthSubmit(event) {
+  event.preventDefault();
+  elements.loginError.classList.add('hidden');
+  elements.authSubmit.disabled = true;
+
+  const identifiant = elements.loginEmail.value.trim();
+  if (!identifiant) return afficherErreur('Indique ton identifiant.');
+  const email = identifiantVersEmail(identifiant);
+  const password = elements.loginPassword.value;
+
+  try {
+    if (authMode === 'connexion') {
+      const { error } = await supabaseClient.auth.signInWithPassword({ email, password });
+      if (error) {
+        afficherErreur(error.message.includes('Invalid login credentials')
+          ? 'Identifiant ou mot de passe incorrect.'
+          : 'Connexion impossible. Réessaie dans un instant.');
+      }
+      // Si OK : onAuthStateChange appelle router() tout seul
+    } else {
+      const nom = elements.signupName.value.trim();
+      const code = elements.signupCode.value.trim().toUpperCase();
+      if (nom.length < 2) return afficherErreur('Indique ton prénom (ou prénom + nom).');
+      if (code !== CODE_EQUIPE) return afficherErreur('Code équipe incorrect. Demande-le à Matty. 😉');
+      if (password.length < 6) return afficherErreur('Le mot de passe doit faire au moins 6 caractères.');
+
+      const { error } = await supabaseClient.auth.signUp({
+        email,
+        password,
+        options: { data: { nom } } // récupéré par le trigger SQL → profiles.nom
+      });
+      if (error) {
+        afficherErreur(error.message.includes('already registered')
+          ? 'Un compte existe déjà avec cet identifiant.'
+          : 'Inscription impossible. Réessaie avec un autre identifiant.');
+      }
+      // Si OK : session créée avec statut en_attente → écran d'attente
+    }
+  } finally {
+    elements.authSubmit.disabled = false;
+  }
+}
+
+function afficherErreur(message) {
+  elements.loginError.textContent = message;
+  elements.loginError.classList.remove('hidden');
+}
+
+async function handleLogout() {
+  await supabaseClient.auth.signOut();
+  authUser = null;
+  monProfil = null;
+  selectedUserId = null;
+  showLogin();
+}
+
+// ============================================================
+// ÉCRANS
+// ============================================================
+
+function montrer(ecran) {
+  [elements.loginScreen, elements.pendingScreen, elements.appScreen]
+    .forEach(p => p.classList.remove('active'));
+  ecran.classList.add('active');
+}
+
+function showLogin() {
+  montrer(elements.loginScreen);
+  elements.chatFloat.classList.add('hidden');
+  elements.loginError.classList.add('hidden');
+}
+
+function showPending() {
+  montrer(elements.pendingScreen);
+  elements.chatFloat.classList.add('hidden');
+  const refuse = monProfil?.statut === 'refuse';
+  elements.pendingIcon.textContent = refuse ? '🚫' : '⏳';
+  elements.pendingTitle.textContent = refuse ? 'Demande refusée' : 'Demande envoyée !';
+  elements.pendingText.textContent = refuse
+    ? "Ta demande d'accès n'a pas été acceptée. Si tu penses que c'est une erreur, parles-en directement à Matty."
+    : "Ton compte est en attente de validation par un admin. Cette page se mettra à jour toute seule dès que ta demande est acceptée.";
+  elements.pendingPulse.classList.toggle('hidden', refuse);
+}
+
 function showApp() {
-  elements.loginScreen.classList.remove('active');
-  elements.appScreen.classList.add('active');
+  montrer(elements.appScreen);
+  elements.chatFloat.classList.remove('hidden');
   elements.welcomeText.textContent = `Connecté en tant que ${authUser.name}`;
-  selectedUserId = selectedUserId || authUser.id;
   renderUsers();
   renderWeek();
   renderSchedule();
   renderSharedSchedule();
   renderChat();
+  if (monProfil?.role === 'admin') {
+    elements.adminBlock.classList.remove('hidden');
+    renderDemandes();
+  } else {
+    elements.adminBlock.classList.add('hidden');
+  }
   setupPushNotifications();
 }
 
+// ============================================================
+// PANNEAU ADMIN — Accepter / refuser les demandes
+// ============================================================
+
+async function renderDemandes() {
+  const { data: rows, error } = await supabaseClient
+    .from('profiles')
+    .select('id, nom, email, created_at')
+    .eq('statut', 'en_attente')
+    .order('created_at', { ascending: false });
+  if (error) { console.error(error); return; }
+
+  elements.adminCount.textContent = rows.length;
+  elements.adminCount.classList.toggle('hidden', rows.length === 0);
+  elements.adminDemandes.innerHTML = '';
+
+  if (!rows.length) {
+    const vide = document.createElement('li');
+    vide.style.color = '#64748b';
+    vide.textContent = 'Aucune demande en attente.';
+    elements.adminDemandes.appendChild(vide);
+    return;
+  }
+
+  rows.forEach(p => {
+    const item = document.createElement('li');
+    item.className = 'demande-item';
+    const infos = document.createElement('div');
+    const nom = document.createElement('strong');
+    nom.textContent = p.nom || '(sans nom)';
+    const email = document.createElement('small');
+    email.textContent = p.email;
+    infos.appendChild(nom);
+    infos.appendChild(email);
+    const actions = document.createElement('div');
+    actions.className = 'demande-actions';
+    const accepter = document.createElement('button');
+    accepter.className = 'demande-accepter';
+    accepter.textContent = 'Accepter';
+    accepter.addEventListener('click', () => changerStatut(p.id, 'approuve'));
+    const refuser = document.createElement('button');
+    refuser.className = 'demande-refuser';
+    refuser.textContent = 'Refuser';
+    refuser.addEventListener('click', () => {
+      if (confirm(`Refuser la demande de ${p.nom || p.email} ?`)) {
+        changerStatut(p.id, 'refuse');
+      }
+    });
+    actions.appendChild(accepter);
+    actions.appendChild(refuser);
+    item.appendChild(infos);
+    item.appendChild(actions);
+    elements.adminDemandes.appendChild(item);
+  });
+}
+
+async function changerStatut(profilId, statut) {
+  const { error } = await supabaseClient
+    .from('profiles')
+    .update({ statut })
+    .eq('id', profilId);
+  if (error) {
+    console.error(error);
+    alert('Impossible de mettre à jour. Réessaie.');
+  }
+  // Le realtime sur profiles rafraîchit la liste tout seul
+}
+
+// ============================================================
+// NOTIFICATIONS PUSH (abonnement — l'ENVOI arrive en phase 5)
+// ============================================================
+
 async function setupPushNotifications() {
-  if (!('serviceWorker' in navigator) || !('PushManager' in window) || !('Notification' in window)) return;
+  if (!('serviceWorker' in navigator) || !('PushManager' in window) || !('Notification' in window)) {
+    elements.enablePush.classList.add('hidden');
+    return;
+  }
+  if (Notification.permission === 'granted') {
+    elements.enablePush.classList.add('hidden');
+    await enregistrerAbonnement();
+  } else if (Notification.permission === 'default') {
+    // L'autorisation DOIT venir d'un clic (exigence iOS notamment)
+    elements.enablePush.classList.remove('hidden');
+  } else {
+    elements.enablePush.classList.add('hidden');
+  }
+}
+
+async function activerPush() {
+  const permission = await Notification.requestPermission();
+  if (permission === 'granted') {
+    elements.enablePush.classList.add('hidden');
+    await enregistrerAbonnement();
+  }
+}
+
+async function enregistrerAbonnement() {
   try {
-    const permission = await Notification.requestPermission();
-    if (permission !== 'granted') return;
     const registration = await navigator.serviceWorker.ready;
     let subscription = await registration.pushManager.getSubscription();
     if (!subscription) {
@@ -155,33 +473,18 @@ async function setupPushNotifications() {
     console.error('Notifications push :', err);
   }
 }
+
 function urlBase64ToUint8Array(base64String) {
   const padding = '='.repeat((4 - base64String.length % 4) % 4);
   const base64 = (base64String + padding).replace(/-/g, '+').replace(/_/g, '/');
   const rawData = window.atob(base64);
   return Uint8Array.from([...rawData].map(char => char.charCodeAt(0)));
 }
-function handleLogin(event) {
-  event.preventDefault();
-  const name = elements.loginName.value.trim();
-  const password = elements.loginPassword.value.trim();
-  const user = users.find(item => item.name.toLowerCase() === name.toLowerCase());
-  if (!user || user.password !== password) {
-    elements.loginError.textContent = 'Identifiant ou mot de passe invalide.';
-    elements.loginError.classList.remove('hidden');
-    return;
-  }
-  authUser = user;
-  selectedUserId = user.id;
-  localStorage.setItem(authStoreKey, JSON.stringify({ id: user.id }));
-  showApp();
-}
-function handleLogout() {
-  authUser = null;
-  selectedUserId = null;
-  localStorage.removeItem(authStoreKey);
-  showLogin();
-}
+
+// ============================================================
+// SEMAINE & PLANNING (logique d'origine conservée)
+// ============================================================
+
 function changeWeek(direction) {
   currentWeek = new Date(currentWeek.getTime() + direction * 7 * 24 * 60 * 60 * 1000);
   currentWeek = getMonday(currentWeek);
@@ -190,21 +493,21 @@ function changeWeek(direction) {
   renderSchedule();
   renderSharedSchedule();
 }
+
 function renderWeek() {
   const end = new Date(currentWeek.getTime() + 6 * 24 * 60 * 60 * 1000);
   elements.weekLabel.textContent = `${formatDate(currentWeek)} → ${formatDate(end)}`;
 }
+
 function renderUsers() {
   elements.userList.innerHTML = '';
-  users.forEach(user => {
+  profils.forEach(user => {
     const item = document.createElement('li');
     item.className = `user-item${selectedUserId === user.id ? ' active' : ''}`;
     const title = document.createElement('span');
-    title.innerHTML = `<strong>${user.name}</strong>`;
-    const color = document.createElement('span');
-    color.className = 'color-dot';
-    color.style.backgroundColor = user.color;
-    title.appendChild(color);
+    const strong = document.createElement('strong');
+    strong.textContent = user.name;
+    title.appendChild(strong);
     item.appendChild(title);
     const viewButton = document.createElement('button');
     viewButton.textContent = 'Voir';
@@ -220,11 +523,12 @@ function renderUsers() {
     elements.userList.appendChild(item);
   });
 }
+
 function renderSchedule() {
-  const user = users.find(u => u.id === selectedUserId);
+  const user = profils.find(u => u.id === selectedUserId) ||
+    (selectedUserId === authUser?.id ? authUser : null);
   if (!user) return;
   elements.scheduleTitle.textContent = `Emploi du temps de ${user.name}`;
-  elements.userColorDot.style.backgroundColor = user.color;
   const editable = authUser && authUser.id === selectedUserId;
   renderEditToggle(editable);
   const weekDays = generateWeekDays(currentWeek);
@@ -255,10 +559,15 @@ function renderSchedule() {
       dayEvents.forEach(event => {
         const card = document.createElement('div');
         card.className = 'event-card';
-        card.innerHTML = `
-          <strong>${event.title}</strong>
-          <div class="event-meta"><span>${event.start} - ${event.end}</span></div>
-        `;
+        const titre = document.createElement('strong');
+        titre.textContent = event.title;
+        const meta = document.createElement('div');
+        meta.className = 'event-meta';
+        const plage = document.createElement('span');
+        plage.textContent = `${event.start} - ${event.end}`;
+        meta.appendChild(plage);
+        card.appendChild(titre);
+        card.appendChild(meta);
         if (authUser && authUser.id === user.id) {
           const actions = document.createElement('div');
           actions.className = 'event-actions';
@@ -279,6 +588,7 @@ function renderSchedule() {
   }
   renderEditPanel(events);
 }
+
 function renderEditToggle(editable) {
   const toggle = elements.toggleEditPanel;
   if (!toggle) return;
@@ -289,6 +599,7 @@ function renderEditToggle(editable) {
     toggle.classList.add('hidden');
   }
 }
+
 function renderEditPanel(events) {
   const editable = authUser && authUser.id === selectedUserId;
   if (!editable) {
@@ -349,6 +660,7 @@ function renderEditPanel(events) {
   eventForm.addEventListener('submit', handleEventSubmit);
   cancelEdit.addEventListener('click', resetEditForm);
 }
+
 async function handleEventSubmit(event) {
   event.preventDefault();
   const weekKey = getWeekKey(currentWeek);
@@ -369,6 +681,7 @@ async function handleEventSubmit(event) {
   renderSchedule();
   renderSharedSchedule();
 }
+
 function showEditForm(eventId) {
   editPanelOpen = true;
   const weekKey = getWeekKey(currentWeek);
@@ -384,6 +697,7 @@ function showEditForm(eventId) {
   const primaryBtn = document.querySelector('#event-form button.primary');
   if (primaryBtn) primaryBtn.textContent = 'Mettre à jour';
 }
+
 function resetEditForm() {
   const eventForm = document.getElementById('event-form');
   if (eventForm) eventForm.reset();
@@ -392,6 +706,7 @@ function resetEditForm() {
   editPanelOpen = false;
   renderSchedule();
 }
+
 async function deleteEvent(eventId) {
   if (!confirm('Supprimer cette plage horaire ?')) return;
   await removeEvent(eventId);
@@ -399,12 +714,12 @@ async function deleteEvent(eventId) {
   renderSchedule();
   renderSharedSchedule();
 }
+
 function renderSharedSchedule() {
   const weekDays = generateWeekDays(currentWeek);
   elements.sharedGrid.innerHTML = '';
   const weekKey = getWeekKey(currentWeek);
   const totalsByDay = Array(7).fill(0);
-  // Ligne d'en-tête avec les jours
   const headerRow = document.createElement('div');
   headerRow.className = 'shared-row shared-header';
   const corner = document.createElement('div');
@@ -417,13 +732,12 @@ function renderSharedSchedule() {
     headerRow.appendChild(cell);
   });
   elements.sharedGrid.appendChild(headerRow);
-  users.forEach(user => {
+  profils.forEach(user => {
     const row = document.createElement('div');
     row.className = 'shared-row';
     const title = document.createElement('div');
     title.className = 'person-name';
     title.textContent = user.name;
-    title.style.border = `2px solid ${user.color}`;
     row.appendChild(title);
     const events = data[weekKey]?.[user.id] || [];
     for (let dayIndex = 0; dayIndex < 7; dayIndex += 1) {
@@ -439,8 +753,6 @@ function renderSharedSchedule() {
         dayEvents.forEach(entry => {
           const entryEl = document.createElement('div');
           entryEl.className = 'shared-entry';
-          entryEl.style.background = `${user.color}33`;
-          entryEl.style.border = `1px solid ${user.color}`;
           entryEl.textContent = `${entry.start}-${entry.end} ${entry.title}`;
           cell.appendChild(entryEl);
         });
@@ -456,6 +768,11 @@ function renderSharedSchedule() {
     </div>
   `;
 }
+
+// ============================================================
+// CHAT (logique d'origine conservée)
+// ============================================================
+
 function toggleChat() {
   const nowHidden = elements.chatPanel.classList.toggle('hidden');
   document.body.classList.toggle('chat-open', !nowHidden);
@@ -463,6 +780,7 @@ function toggleChat() {
     elements.chatMessages.scrollTop = elements.chatMessages.scrollHeight;
   }
 }
+
 async function handleChatSubmit(event) {
   event.preventDefault();
   const message = elements.chatInput.value.trim();
@@ -471,6 +789,7 @@ async function handleChatSubmit(event) {
   await sendMessage(author, message);
   elements.chatInput.value = '';
 }
+
 function renderChat() {
   elements.chatMessages.innerHTML = '';
   chatMessages.slice(-40).forEach(item => {
@@ -491,13 +810,17 @@ function renderChat() {
   });
   elements.chatMessages.scrollTop = elements.chatMessages.scrollHeight;
 }
+
 function formatStamp(iso) {
   const d = new Date(iso);
   const days = ['Dim', 'Lun', 'Mar', 'Mer', 'Jeu', 'Ven', 'Sam'];
   return `${days[d.getDay()]} ${formatDate(d)} · ${formatTime(iso)}`;
 }
 
-// --- Supabase: emploi du temps ---
+// ============================================================
+// SUPABASE : données (logique d'origine conservée)
+// ============================================================
+
 async function loadData() {
   const { data: rows, error } = await supabaseClient.from('events').select('*');
   if (error) { console.error(error); return {}; }
@@ -515,6 +838,7 @@ async function loadData() {
   });
   return grouped;
 }
+
 async function saveEvent(weekKey, userId, event) {
   const { error } = await supabaseClient.from('events').upsert({
     id: event.id,
@@ -527,14 +851,14 @@ async function saveEvent(weekKey, userId, event) {
   });
   if (error) console.error(error);
 }
+
 async function removeEvent(eventId) {
   const { error } = await supabaseClient.from('events').delete().eq('id', eventId);
   if (error) console.error(error);
 }
 
-// --- Supabase: chat ---
 async function loadChat() {
-  // Suppression automatique des messages de plus de 48h
+  // Purge des messages > 48h (la RLS n'autorise que ceux-là à la suppression)
   const cutoff = new Date(Date.now() - 48 * 60 * 60 * 1000).toISOString();
   await supabaseClient.from('messages').delete().lt('created_at', cutoff);
   const { data: rows, error } = await supabaseClient
@@ -545,20 +869,27 @@ async function loadChat() {
   if (error) { console.error(error); return []; }
   return rows.map(row => ({ author: row.author, message: row.message, stamp: row.created_at }));
 }
+
 async function sendMessage(author, message) {
   const { error } = await supabaseClient.from('messages').insert({ author, message });
   if (error) console.error(error);
 }
 
+// ============================================================
+// UTILITAIRES (logique d'origine conservée)
+// ============================================================
+
 function saveWeekStart(date) {
   localStorage.setItem('horaire-carrefour-week', date.toISOString());
 }
+
 function loadWeekStart() {
   const raw = localStorage.getItem('horaire-carrefour-week');
   if (!raw) return null;
   const parsed = new Date(raw);
   return isNaN(parsed) ? null : parsed;
 }
+
 function generateWeekDays(monday) {
   const days = [];
   for (let i = 0; i < 7; i += 1) {
@@ -567,9 +898,11 @@ function generateWeekDays(monday) {
   }
   return days;
 }
+
 function getWeekKey(date) {
   return date.toISOString().split('T')[0];
 }
+
 function getMonday(date) {
   const copy = new Date(date);
   const day = copy.getDay();
@@ -578,13 +911,17 @@ function getMonday(date) {
   copy.setHours(0, 0, 0, 0);
   return copy;
 }
+
 function formatDate(date) {
   return date.toLocaleDateString('fr-FR', { day: '2-digit', month: '2-digit' });
 }
+
 function formatTime(iso) {
   return new Date(iso).toLocaleTimeString('fr-FR', { hour: '2-digit', minute: '2-digit' });
 }
+
 function generateId() {
   return `evt_${Math.random().toString(36).slice(2, 10)}`;
 }
+
 initialize();

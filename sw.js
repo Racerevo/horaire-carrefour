@@ -1,4 +1,4 @@
-const CACHE_NAME = 'horaire-carrefour-v6';
+const CACHE_NAME = 'horaire-carrefour-v7';
 const APP_SHELL = [
   './',
   './index.html',
@@ -6,7 +6,8 @@ const APP_SHELL = [
   './script.js',
   './logoCarrefour.png',
   './icon-192.png',
-  './icon-512.png'
+  './icon-512.png',
+  './styles-auth.css'
 ];
 
 // Installation : on met en cache les fichiers de base de l'app

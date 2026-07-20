@@ -9,24 +9,45 @@
   <link rel="apple-touch-icon" href="icon-192.png" />
   <link rel="icon" type="image/png" href="icon-192.png" />
   <link rel="stylesheet" href="styles.css" />
+  <link rel="stylesheet" href="styles-auth.css" />
 </head>
 <body>
   <div class="app-shell">
+
+    <!-- ======== ÉCRAN CONNEXION / INSCRIPTION ======== -->
     <section id="login-screen" class="panel active">
       <div class="login-card">
-        <h1>Connexion employé</h1>
-        <p>Identifiant = votre nom. Mot de passe attribué.</p>
+        <h1>Horaire Carrefour</h1>
+        <p>Le planning de l'équipe, en direct.</p>
+
+        <div class="auth-tabs" role="tablist">
+          <button type="button" id="tab-login" class="auth-tab active" role="tab">Connexion</button>
+          <button type="button" id="tab-signup" class="auth-tab" role="tab">Créer un compte</button>
+        </div>
+
         <form id="login-form">
+          <label id="field-name" class="hidden">
+            Prénom et nom
+            <input type="text" id="signup-name" autocomplete="name" placeholder="Ex : Matty Fourmestraux" />
+          </label>
           <label>
-            Nom
-            <input type="text" id="login-name" autocomplete="username" required />
+            Identifiant
+            <input type="text" id="login-email" autocomplete="username" autocapitalize="none" placeholder="Ex : matty" required />
           </label>
           <label>
             Mot de passe
             <input type="password" id="login-password" autocomplete="current-password" required />
           </label>
-          <button type="submit" class="button primary">Se connecter</button>
+          <label id="field-code" class="hidden">
+            Code équipe
+            <input type="text" id="signup-code" autocapitalize="characters" placeholder="Demande-le à Matty" />
+          </label>
+          <button type="submit" id="auth-submit" class="button primary">Se connecter</button>
           <p id="login-error" class="feedback hidden"></p>
+          <p id="signup-note" class="auth-note hidden">
+            Ton compte devra être validé par un admin avant d'accéder au planning.
+            Tu seras prévenu dès que c'est bon. 👍
+          </p>
         </form>
       </div>
       <div class="brand-mark" aria-label="Carrefour">
@@ -34,6 +55,23 @@
       </div>
     </section>
 
+    <!-- ======== ÉCRAN EN ATTENTE DE VALIDATION ======== -->
+    <section id="pending-screen" class="panel">
+      <div class="login-card pending-card">
+        <div class="pending-icon" id="pending-icon">⏳</div>
+        <h1 id="pending-title">Demande envoyée !</h1>
+        <p id="pending-text">
+          Ton compte est en attente de validation par un admin.
+          Cette page se mettra à jour toute seule dès que ta demande est acceptée.
+        </p>
+        <div class="pending-pulse" id="pending-pulse" aria-hidden="true">
+          <span></span><span></span><span></span>
+        </div>
+        <button id="pending-logout" class="button secondary">Se déconnecter</button>
+      </div>
+    </section>
+
+    <!-- ======== ÉCRAN PRINCIPAL ======== -->
     <section id="app-screen" class="panel">
       <header class="topbar">
         <div>
@@ -53,8 +91,18 @@
 
       <div class="workspace view-planning" id="workspace">
         <aside class="sidebar">
+          <!-- Demandes d'accès (admins uniquement) -->
+          <div id="admin-block" class="hidden">
+            <div class="panel-title">
+              Demandes d'accès <span id="admin-count" class="admin-badge hidden">0</span>
+            </div>
+            <ul id="admin-demandes" class="user-list"></ul>
+          </div>
+
           <div class="panel-title">Employés</div>
           <ul id="user-list" class="user-list"></ul>
+
+          <button id="enable-push" class="button secondary hidden">🔔 Activer les notifications</button>
         </aside>
 
         <main class="main-content">
@@ -69,7 +117,6 @@
           <section class="schedule-panel">
             <div class="section-title">
               <h2 id="schedule-title">Emploi du temps</h2>
-              <span id="user-color-dot" class="color-dot"></span>
             </div>
             <div class="schedule-actions">
               <button id="toggle-edit-panel" class="button secondary hidden">Modifier l'emploi du temps</button>
@@ -92,7 +139,7 @@
     </section>
   </div>
 
-  <div class="chat-float">
+  <div class="chat-float hidden" id="chat-float">
     <button id="chat-toggle" class="chat-bubble-toggle" aria-label="Ouvrir le chat">💬</button>
     <div id="chat-panel" class="chat-panel hidden">
       <div class="chat-header">
