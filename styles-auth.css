@@ -102,3 +102,124 @@
 .shared-row .person-name {
   border: 1px solid rgba(148, 163, 184, 0.25);
 }
+
+/* ============ Import photo du planning ============ */
+.import-overlay {
+  position: fixed;
+  inset: 0;
+  z-index: 90;
+  background: rgba(2, 6, 23, 0.75);
+  backdrop-filter: blur(3px);
+  display: grid;
+  place-items: center;
+  padding: 16px;
+}
+.import-box {
+  width: min(560px, 100%);
+  max-height: 90vh;
+  overflow-y: auto;
+  background: #0f172a;
+  border: 1px solid rgba(148, 163, 184, 0.2);
+  border-radius: 24px;
+  padding: 22px;
+  display: grid;
+  gap: 16px;
+}
+.import-header {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 12px;
+}
+.import-header h3 { margin: 0; }
+.import-analyse { display: grid; gap: 12px; justify-items: center; }
+.import-analyse img {
+  max-width: 100%;
+  max-height: 240px;
+  border-radius: 14px;
+  object-fit: contain;
+}
+.import-bar {
+  width: 100%;
+  height: 8px;
+  border-radius: 999px;
+  background: #1f2937;
+  overflow: hidden;
+}
+.import-bar div {
+  height: 100%;
+  width: 0;
+  background: #2563eb;
+  border-radius: 999px;
+  transition: width 0.25s ease;
+}
+.import-analyse p { margin: 0; color: #94a3b8; }
+.import-periode { margin: 0; color: #94a3b8; font-weight: 600; }
+.import-alertes {
+  background: rgba(234, 179, 8, 0.08);
+  border: 1px solid rgba(234, 179, 8, 0.35);
+  border-radius: 14px;
+  padding: 10px 14px;
+  display: grid;
+  gap: 4px;
+}
+.import-alertes p { margin: 0; font-size: 0.85rem; color: #eab308; }
+.import-jour {
+  background: #111827;
+  border: 1px solid rgba(148, 163, 184, 0.12);
+  border-radius: 16px;
+  padding: 12px 14px;
+  margin-bottom: 10px;
+  display: grid;
+  gap: 8px;
+}
+.import-jour-entete strong { color: #60a5fa; }
+.import-repos { margin: 0; color: #64748b; font-style: italic; }
+.import-creneau {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+  flex-wrap: wrap;
+}
+.import-creneau input[type='time'] {
+  width: auto;
+  padding: 10px 8px;
+}
+.import-creneau span { color: #64748b; }
+.import-poste {
+  flex: 1;
+  min-width: 90px;
+  padding: 10px 12px;
+  text-transform: uppercase;
+}
+.import-suppr {
+  border: none;
+  background: rgba(220, 38, 38, 0.15);
+  color: #fca5a5;
+  width: 38px;
+  height: 38px;
+  border-radius: 12px;
+  font-size: 0.9rem;
+  flex-shrink: 0;
+}
+.import-ajouter {
+  border: none;
+  background: none;
+  color: #60a5fa;
+  font-weight: 600;
+  font-size: 0.88rem;
+  justify-self: start;
+  padding: 2px 0;
+}
+.import-note { margin: 0; color: #94a3b8; font-size: 0.85rem; }
+.import-actions { display: grid; gap: 10px; }
+@media (max-width: 860px) {
+  .import-overlay { padding: 0; }
+  .import-box {
+    width: 100%;
+    max-height: 100vh;
+    height: 100dvh;
+    border-radius: 0;
+    padding: 18px 16px calc(18px + env(safe-area-inset-bottom));
+  }
+}

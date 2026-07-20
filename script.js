@@ -67,6 +67,20 @@ const elements = {
   toggleEditPanel: document.getElementById('toggle-edit-panel'),
   sharedGrid: document.getElementById('shared-grid'),
   overlapSummary: document.getElementById('overlap-summary'),
+  importButton: document.getElementById('import-photo-button'),
+  importInput: document.getElementById('import-photo-input'),
+  importModal: document.getElementById('import-modal'),
+  importClose: document.getElementById('import-close'),
+  importStepAnalyse: document.getElementById('import-step-analyse'),
+  importStepVerif: document.getElementById('import-step-verif'),
+  importPreview: document.getElementById('import-preview'),
+  importBarFill: document.getElementById('import-bar-fill'),
+  importProgressText: document.getElementById('import-progress-text'),
+  importPeriode: document.getElementById('import-periode'),
+  importAlertes: document.getElementById('import-alertes'),
+  importJours: document.getElementById('import-jours'),
+  importValider: document.getElementById('import-valider'),
+  importRetry: document.getElementById('import-retry'),
   chatFloat: document.getElementById('chat-float'),
   chatToggle: document.getElementById('chat-toggle'),
   chatPanel: document.getElementById('chat-panel'),
@@ -213,6 +227,14 @@ function bindEvents() {
   elements.chatToggle.addEventListener('click', toggleChat);
   elements.chatClose.addEventListener('click', toggleChat);
   elements.chatForm.addEventListener('submit', handleChatSubmit);
+  elements.importButton?.addEventListener('click', () => elements.importInput.click());
+  elements.importInput?.addEventListener('change', analyserPhotoPlanning);
+  elements.importClose?.addEventListener('click', fermerImport);
+  elements.importRetry?.addEventListener('click', () => {
+    fermerImport();
+    elements.importInput.click();
+  });
+  elements.importValider?.addEventListener('click', validerImport);
   elements.toggleEditPanel?.addEventListener('click', () => {
     editPanelOpen = !editPanelOpen;
     renderSchedule();
@@ -595,8 +617,10 @@ function renderEditToggle(editable) {
   if (editable) {
     toggle.classList.remove('hidden');
     toggle.textContent = editPanelOpen ? 'Fermer modification' : "Modifier l'emploi du temps";
+    elements.importButton?.classList.remove('hidden');
   } else {
     toggle.classList.add('hidden');
+    elements.importButton?.classList.add('hidden');
   }
 }
 
@@ -873,6 +897,322 @@ async function loadChat() {
 async function sendMessage(author, message) {
   const { error } = await supabaseClient.from('messages').insert({ author, message });
   if (error) console.error(error);
+}
+
+
+// ============================================================
+// IMPORT PHOTO DU PLANNING (OCR Tesseract.js, gratuit, dans le navigateur)
+// Photo du ticket papier -> lecture -> corrections auto -> vérification -> events
+// ============================================================
+
+let importResultat = null; // { periode, weekKey, jours: [{dayIndex, repos, creneaux:[{start,end,title}]}], alertes }
+
+const CODES_POSTES = { CAI: 'Caisse', CAISSE: 'Caisse', PANIER: 'Panier', PANIERS: 'Panier', ACC: 'Accueil', ACCUEIL: 'Accueil', ROLLER: 'Roller', CADIE: 'Cadie' };
+const JOURS_LETTRES = ['L', 'M', 'M', 'J', 'V', 'S', 'D'];
+const JOURS_NOMS = ['Lundi', 'Mardi', 'Mercredi', 'Jeudi', 'Vendredi', 'Samedi', 'Dimanche'];
+
+async function analyserPhotoPlanning(event) {
+  const fichier = event.target.files?.[0];
+  event.target.value = '';
+  if (!fichier) return;
+
+  ouvrirImport('analyse');
+  elements.importPreview.src = URL.createObjectURL(fichier);
+  majProgression(0, 'Lecture des horaires…');
+
+  try {
+    const { data } = await Tesseract.recognize(fichier, 'fra', {
+      logger: m => {
+        if (m.status === 'recognizing text') {
+          majProgression(Math.round(m.progress * 100), `Lecture des horaires… ${Math.round(m.progress * 100)}%`);
+        } else if (m.status === 'loading language traineddata') {
+          majProgression(0, 'Chargement du moteur de lecture…');
+        }
+      }
+    });
+
+    importResultat = parsePlanningOcr(data.text);
+    if (!importResultat.jours.some(j => j.repos || j.creneaux.length)) {
+      alert("Aucun horaire reconnu sur cette photo. Reprends-la bien à plat, avec un bon éclairage et le ticket entier dans le cadre.");
+      fermerImport();
+      return;
+    }
+    afficherVerification();
+  } catch (err) {
+    console.error('Import photo :', err);
+    alert("L'analyse a échoué. Réessaie avec une autre photo.");
+    fermerImport();
+  }
+}
+
+function majProgression(pct, texte) {
+  elements.importBarFill.style.width = `${pct}%`;
+  elements.importProgressText.textContent = texte;
+}
+
+function ouvrirImport(etape) {
+  elements.importModal.classList.remove('hidden');
+  elements.importStepAnalyse.classList.toggle('hidden', etape !== 'analyse');
+  elements.importStepVerif.classList.toggle('hidden', etape !== 'verif');
+}
+
+function fermerImport() {
+  elements.importModal.classList.add('hidden');
+  if (elements.importPreview.src) URL.revokeObjectURL(elements.importPreview.src);
+  elements.importPreview.src = '';
+  importResultat = null;
+}
+
+// ---------- Parseur du texte OCR ----------
+
+function corrigerLigneOcr(ligne) {
+  let l = ligne;
+  l = l.replace(/^[\s"'`.,;:|_\-]+/, '');                    // ponctuation parasite en tête
+  l = l.replace(/^[$5]\s+(\d{1,2}\b)/, 'S $1');             // $ ou 5 -> S (samedi)
+  l = l.replace(/^0\s+(\d{1,2}\s+\d{1,2}[:h])/, 'D $1');   // 0 -> D (dimanche)
+  l = l.replace(/(?<=\d)[Oo](?=[:h\d])/g, '0');              // O -> 0 dans les heures
+  l = l.replace(/\b[lI](\d[:h]\d{2})/g, '1$1');             // l/I -> 1
+  l = l.replace(/(\d{1,2})[hH](\d{2})/g, '$1:$2');           // 9h30 -> 9:30
+  return l.trim();
+}
+
+function corrigerHeureOcr(hhmm) {
+  let [h, m] = hhmm.split(':').map(Number);
+  if (h > 23) {
+    const dizaine = Math.floor(h / 10), unite = h % 10;
+    h = (dizaine === 4 || dizaine === 7) ? 10 + unite : unite; // 44->14, 71->11, 99->9
+  }
+  if (m > 59) m = m % 60;
+  return `${String(h).padStart(2, '0')}:${String(m).padStart(2, '0')}`;
+}
+
+function parsePlanningOcr(texte) {
+  const alertes = [];
+
+  // Période "Du 06/07/2026 au 12/07/2026" -> semaine cible
+  const mPeriode = texte.match(/[Dd]u\s+(\d{2})\/(\d{2})\/(\d{4})\s+au\s+(\d{2})\/(\d{2})\/(\d{4})/);
+  let lundiImport = null;
+  if (mPeriode) {
+    lundiImport = getMonday(new Date(`${mPeriode[3]}-${mPeriode[2]}-${mPeriode[1]}T00:00:00`));
+  } else {
+    lundiImport = currentWeek;
+    alertes.push("Période introuvable sur la photo : import dans la semaine affichée actuellement.");
+  }
+  const weekKey = getWeekKey(lundiImport);
+
+  const jours = [];
+  const regexJour = /^([LMJVSD])\s+(\d{1,2})\s*(.*)$/;
+  const regexCreneau = /(\d{1,2}:\d{2})\s*[-–—]\s*(\d{1,2}:\d{2})\s*([A-ZÀ-Ü][A-ZÀ-Ü0-9]{1,15})?/g;
+
+  let ordreM = 0; // pour distinguer mardi / mercredi si pas de dates fiables
+  for (const brute of texte.split('\n')) {
+    const ligne = corrigerLigneOcr(brute);
+    const m = ligne.match(regexJour);
+    if (!m) continue;
+
+    const [, lettre, numeroJourStr, reste] = m;
+    const numeroJour = parseInt(numeroJourStr, 10);
+
+    // dayIndex : via la date si période connue, sinon via la lettre
+    let dayIndex;
+    if (mPeriode) {
+      dayIndex = Math.round((numeroJour - lundiImport.getDate() + 31) % 31);
+      if (dayIndex < 0 || dayIndex > 6) dayIndex = null;
+    }
+    if (dayIndex === null || dayIndex === undefined) {
+      if (lettre === 'M') { dayIndex = ordreM === 0 ? 1 : 2; }
+      else dayIndex = { L: 0, J: 3, V: 4, S: 5, D: 6 }[lettre];
+    }
+    if (lettre === 'M') ordreM += 1;
+    if (dayIndex === undefined || dayIndex === null) continue;
+
+    const jour = { dayIndex, repos: /repos|cp|congé/i.test(reste) && !/\d{1,2}:\d{2}/.test(reste), creneaux: [] };
+
+    let c;
+    while ((c = regexCreneau.exec(reste)) !== null) {
+      const start = corrigerHeureOcr(c[1]);
+      const end = corrigerHeureOcr(c[2]);
+      const codeBrut = (c[3] || '').toUpperCase();
+      const title = CODES_POSTES[codeBrut] || codeBrut || 'Caisse';
+      if (c[1] !== start || c[2] !== end) {
+        alertes.push(`${JOURS_NOMS[dayIndex]} : "${c[1]}-${c[2]}" corrigé en "${start}-${end}".`);
+      }
+      if (start >= end) {
+        alertes.push(`${JOURS_NOMS[dayIndex]} : créneau ${start}-${end} incohérent, à corriger.`);
+      }
+      jour.creneaux.push({ start, end, title });
+    }
+
+    if (!jour.repos && jour.creneaux.length === 0) {
+      alertes.push(`${JOURS_NOMS[dayIndex]} : aucun horaire lu, à compléter à la main si besoin.`);
+    }
+    jours.push(jour);
+  }
+
+  // Complète les jours manquants (affichés vides dans la vérification)
+  for (let i = 0; i < 7; i += 1) {
+    if (!jours.some(j => j.dayIndex === i)) jours.push({ dayIndex: i, repos: true, creneaux: [] });
+  }
+  jours.sort((a, b) => a.dayIndex - b.dayIndex);
+
+  if (jours.filter(j => j.creneaux.length || j.repos).length < 7) {
+    alertes.push('Certains jours n\u2019ont pas été reconnus : vérifie que rien ne manque.');
+  }
+
+  return { weekKey, lundiImport, jours, alertes };
+}
+
+// ---------- Écran de vérification ----------
+
+function afficherVerification() {
+  ouvrirImport('verif');
+  const { lundiImport, alertes } = importResultat;
+  const fin = new Date(lundiImport.getTime() + 6 * 24 * 60 * 60 * 1000);
+  elements.importPeriode.textContent = `Semaine du ${formatDate(lundiImport)} au ${formatDate(fin)}`;
+
+  elements.importAlertes.classList.toggle('hidden', alertes.length === 0);
+  elements.importAlertes.innerHTML = '';
+  alertes.forEach(a => {
+    const p = document.createElement('p');
+    p.textContent = `⚠️ ${a}`;
+    elements.importAlertes.appendChild(p);
+  });
+
+  renderJoursImport();
+}
+
+function renderJoursImport() {
+  elements.importJours.innerHTML = '';
+  importResultat.jours.forEach(jour => {
+    const bloc = document.createElement('div');
+    bloc.className = 'import-jour';
+
+    const entete = document.createElement('div');
+    entete.className = 'import-jour-entete';
+    const titre = document.createElement('strong');
+    titre.textContent = JOURS_NOMS[jour.dayIndex];
+    entete.appendChild(titre);
+    bloc.appendChild(entete);
+
+    if (jour.creneaux.length === 0) {
+      const repos = document.createElement('p');
+      repos.className = 'import-repos';
+      repos.textContent = 'Repos';
+      bloc.appendChild(repos);
+    }
+
+    jour.creneaux.forEach((creneau, iC) => {
+      const ligne = document.createElement('div');
+      ligne.className = 'import-creneau';
+
+      const debut = document.createElement('input');
+      debut.type = 'time';
+      debut.value = creneau.start;
+      debut.addEventListener('change', () => { creneau.start = debut.value; });
+
+      const fleche = document.createElement('span');
+      fleche.textContent = '→';
+
+      const finInput = document.createElement('input');
+      finInput.type = 'time';
+      finInput.value = creneau.end;
+      finInput.addEventListener('change', () => { creneau.end = finInput.value; });
+
+      const poste = document.createElement('input');
+      poste.type = 'text';
+      poste.className = 'import-poste';
+      poste.value = creneau.title;
+      poste.placeholder = 'Poste';
+      poste.addEventListener('change', () => { creneau.title = poste.value.trim() || 'Caisse'; });
+
+      const suppr = document.createElement('button');
+      suppr.type = 'button';
+      suppr.className = 'import-suppr';
+      suppr.textContent = '✕';
+      suppr.setAttribute('aria-label', 'Supprimer ce créneau');
+      suppr.addEventListener('click', () => {
+        jour.creneaux.splice(iC, 1);
+        renderJoursImport();
+      });
+
+      ligne.appendChild(debut);
+      ligne.appendChild(fleche);
+      ligne.appendChild(finInput);
+      ligne.appendChild(poste);
+      ligne.appendChild(suppr);
+      bloc.appendChild(ligne);
+    });
+
+    const ajouter = document.createElement('button');
+    ajouter.type = 'button';
+    ajouter.className = 'import-ajouter';
+    ajouter.textContent = '+ Ajouter un créneau';
+    ajouter.addEventListener('click', () => {
+      const dernier = jour.creneaux[jour.creneaux.length - 1];
+      jour.creneaux.push({ start: dernier ? dernier.end : '09:00', end: dernier ? '19:00' : '12:00', title: 'Caisse' });
+      renderJoursImport();
+    });
+    bloc.appendChild(ajouter);
+
+    elements.importJours.appendChild(bloc);
+  });
+}
+
+// ---------- Validation -> table events ----------
+
+async function validerImport() {
+  const { weekKey, lundiImport, jours } = importResultat;
+
+  const invalides = jours.flatMap(j => j.creneaux.filter(c => !c.start || !c.end || c.start >= c.end));
+  if (invalides.length > 0) {
+    alert('Certains créneaux ont une fin avant le début : corrige-les avant de valider.');
+    return;
+  }
+
+  elements.importValider.disabled = true;
+  elements.importValider.textContent = 'Enregistrement…';
+
+  try {
+    // Remplace les créneaux existants de cette semaine
+    const { error: errDelete } = await supabaseClient
+      .from('events')
+      .delete()
+      .eq('user_id', authUser.id)
+      .eq('week_key', weekKey);
+    if (errDelete) throw errDelete;
+
+    const lignes = jours.flatMap(jour =>
+      jour.creneaux.map(c => ({
+        id: generateId(),
+        week_key: weekKey,
+        user_id: authUser.id,
+        day_index: jour.dayIndex,
+        title: c.title,
+        start_time: c.start,
+        end_time: c.end
+      }))
+    );
+
+    if (lignes.length > 0) {
+      const { error: errInsert } = await supabaseClient.from('events').insert(lignes);
+      if (errInsert) throw errInsert;
+    }
+
+    // Navigue vers la semaine importée et rafraîchit
+    currentWeek = lundiImport;
+    saveWeekStart(currentWeek);
+    data = await loadData();
+    fermerImport();
+    renderWeek();
+    renderSchedule();
+    renderSharedSchedule();
+  } catch (err) {
+    console.error('Validation import :', err);
+    alert("L'enregistrement a échoué. Vérifie ta connexion et réessaie.");
+  } finally {
+    elements.importValider.disabled = false;
+    elements.importValider.textContent = 'Valider le planning';
+  }
 }
 
 // ============================================================

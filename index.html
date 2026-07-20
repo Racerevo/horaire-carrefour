@@ -119,8 +119,10 @@
               <h2 id="schedule-title">Emploi du temps</h2>
             </div>
             <div class="schedule-actions">
+              <button id="import-photo-button" class="button secondary hidden">📷 Importer une photo</button>
               <button id="toggle-edit-panel" class="button secondary hidden">Modifier l'emploi du temps</button>
             </div>
+            <input type="file" id="import-photo-input" accept="image/*" capture="environment" class="hidden" />
             <div class="week-days" id="week-days"></div>
             <div id="schedule-grid" class="schedule-grid"></div>
             <div id="edit-panel" class="edit-panel hidden"></div>
@@ -153,6 +155,33 @@
       </form>
     </div>
   </div>
+  <div id="import-modal" class="import-overlay hidden">
+    <div class="import-box">
+      <div class="import-header">
+        <h3 id="import-title">Importer un planning</h3>
+        <button id="import-close" class="icon-button" aria-label="Fermer">✕</button>
+      </div>
+
+      <div id="import-step-analyse" class="import-analyse hidden">
+        <img id="import-preview" alt="Photo du planning" />
+        <div class="import-bar"><div id="import-bar-fill"></div></div>
+        <p id="import-progress-text">Préparation…</p>
+      </div>
+
+      <div id="import-step-verif" class="hidden">
+        <p id="import-periode" class="import-periode"></p>
+        <div id="import-alertes" class="import-alertes hidden"></div>
+        <div id="import-jours"></div>
+        <p class="import-note">Vérifie et corrige si besoin avant de valider — l'import remplace les créneaux de la semaine concernée.</p>
+        <div class="import-actions">
+          <button id="import-valider" class="button primary">Valider le planning</button>
+          <button id="import-retry" class="button secondary">Reprendre la photo</button>
+        </div>
+      </div>
+    </div>
+  </div>
+
+  <script src="https://cdn.jsdelivr.net/npm/tesseract.js@5/dist/tesseract.min.js"></script>
   <script src="https://cdn.jsdelivr.net/npm/@supabase/supabase-js@2"></script>
   <script src="script.js"></script>
   <script>
