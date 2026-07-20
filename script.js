@@ -970,7 +970,7 @@ async function analyserPhotoPlanning(event) {
         meilleurResultat = resultat;
       }
       // Confiant : période trouvée + au moins 4 jours renseignés -> inutile de continuer
-      if (resultat.periodeTrouvee && resultat.jours.filter(j => j.repos || j.creneaux.length).length >= 4) {
+      if (resultat.periodeTrouvee && resultat.joursTrouves.length >= 4) {
         break;
       }
     }
@@ -1034,6 +1034,19 @@ function corrigerHeureOcr(hhmm) {
   return `${String(h).padStart(2, '0')}:${String(m).padStart(2, '0')}`;
 }
 
+// Résout le numéro du jour (ex: 22) en position dans la semaine (0=lundi..6=dimanche)
+// à partir du lundi de la semaine importée. Teste le mois de lundiImport puis le
+// suivant, pour gérer les semaines à cheval sur deux mois (ex: 28/07 -> 03/08)
+// sans le bug d'un simple modulo qui suppose à tort un mois de 31 jours.
+function resoudreDayIndex(numeroJour, lundiImport) {
+  for (const decalageMois of [0, 1]) {
+    const d = new Date(lundiImport.getFullYear(), lundiImport.getMonth() + decalageMois, numeroJour);
+    const diffJours = Math.round((d - lundiImport) / 86400000);
+    if (diffJours >= 0 && diffJours <= 6) return diffJours;
+  }
+  return null;
+}
+
 function parsePlanningOcr(texte) {
   const alertes = [];
 
@@ -1049,10 +1062,15 @@ function parsePlanningOcr(texte) {
   const weekKey = getWeekKey(lundiImport);
 
   const jours = [];
-  const regexJour = /^([LMJVSD])\s+(\d{1,2})\s*(.*)$/;
+  // Pas de "^" en début de motif : le fond (bois, table...) génère des
+  // parasites OCR imprévisibles en tête de ligne ("NY]", "[", "{", "ANS"...),
+  // différents à chaque lecture. On cherche donc le motif jour+numéro où
+  // qu'il apparaisse dans la ligne plutôt que d'exiger un début de ligne
+  // parfaitement propre.
+  const regexJour = /([LMJVSD])\s+(\d{1,2})\s+(.*)/;
   const regexCreneau = /(\d{1,2}:\d{2})\s*[-–—]\s*(\d{1,2}:\d{2})\s*([A-ZÀ-Ü][A-ZÀ-Ü0-9]{1,15})?/g;
 
-  let ordreM = 0; // pour distinguer mardi / mercredi si pas de dates fiables
+  let ordreM = 0; // dernier recours seulement, si le numéro ne permet pas de trancher
   for (const brute of texte.split('\n')) {
     const ligne = corrigerLigneOcr(brute);
     const m = ligne.match(regexJour);
@@ -1061,13 +1079,15 @@ function parsePlanningOcr(texte) {
     const [, lettre, numeroJourStr, reste] = m;
     const numeroJour = parseInt(numeroJourStr, 10);
 
-    // dayIndex : via la date si période connue, sinon via la lettre
-    let dayIndex;
-    if (mPeriode) {
-      dayIndex = Math.round((numeroJour - lundiImport.getDate() + 31) % 31);
-      if (dayIndex < 0 || dayIndex > 6) dayIndex = null;
-    }
-    if (dayIndex === null || dayIndex === undefined) {
+    // Priorité au numéro du jour (ex: "M 21" vs "M 22") : ça lève l'ambiguïté
+    // mardi/mercredi sans dépendre de l'ordre de lecture ni de la présence
+    // des deux lignes. Robuste aux semaines à cheval sur deux mois grâce à
+    // resoudreDayIndex, qui teste le mois de lundiImport puis le suivant.
+    let dayIndex = resoudreDayIndex(numeroJour, lundiImport);
+
+    // Repli sur la lettre UNIQUEMENT si le numéro ne permet pas de conclure
+    // (numéro mal lu, ou aucune période trouvée sur la photo)
+    if (dayIndex === null) {
       if (lettre === 'M') { dayIndex = ordreM === 0 ? 1 : 2; }
       else dayIndex = { L: 0, J: 3, V: 4, S: 5, D: 6 }[lettre];
     }
@@ -1099,6 +1119,17 @@ function parsePlanningOcr(texte) {
 
   jours.sort((a, b) => a.dayIndex - b.dayIndex);
 
+  // Conflit : deux lignes de la photo pointent vers le même jour (typiquement
+  // un numéro mal lu). On prévient plutôt que de choisir silencieusement
+  // laquelle est la bonne — le doublon reste visible pour vérification.
+  const comptageParIndex = new Map();
+  for (const j of jours) comptageParIndex.set(j.dayIndex, (comptageParIndex.get(j.dayIndex) || 0) + 1);
+  for (const [idx, count] of comptageParIndex) {
+    if (count > 1) {
+      alertes.push(`${JOURS_NOMS[idx]} : ${count} lignes de la photo semblent correspondre à ce jour — vérifie qu'aucun horaire ne manque ou n'est mal placé.`);
+    }
+  }
+
   if (jours.length < 7) {
     alertes.push(`${jours.length} jour(s) reconnu(s) sur 7 : les jours manquants sont marqués "à vérifier" ci-dessous, pas devinés.`);
   }
@@ -1120,7 +1151,16 @@ function evaluerConfianceOcr(resultat) {
 // photo devient "à vérifier" (repos: false, creneaux: []) — jamais "Repos" :
 // on ne veut jamais affirmer un repos que l'OCR n'a pas réellement lu.
 function completerJoursPourAffichage(joursTrouves) {
-  const parIndex = new Map(joursTrouves.map(j => [j.dayIndex, j]));
+  const parIndex = new Map();
+  for (const j of joursTrouves) {
+    const existant = parIndex.get(j.dayIndex);
+    // En cas de conflit (deux lignes -> même jour), garde celle qui a du
+    // contenu (repos confirmé ou créneaux) plutôt que d'écraser au hasard
+    // une ligne utile par une vide.
+    if (!existant || (!existant.repos && existant.creneaux.length === 0)) {
+      parIndex.set(j.dayIndex, j);
+    }
+  }
   const complet = [];
   for (let i = 0; i < 7; i += 1) {
     complet.push(parIndex.get(i) || { dayIndex: i, repos: false, creneaux: [] });
