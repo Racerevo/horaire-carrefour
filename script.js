@@ -1021,6 +1021,7 @@ function corrigerLigneOcr(ligne) {
   l = l.replace(/(?<=\d)[Oo](?=[:h\d])/g, '0');              // O -> 0 dans les heures
   l = l.replace(/\b[lI](\d[:h]\d{2})/g, '1$1');             // l/I -> 1
   l = l.replace(/(\d{1,2})[hH](\d{2})/g, '$1:$2');           // 9h30 -> 9:30
+  l = l.replace(/(\d{1,2}):\s+(\d{2})/g, '$1:$2');           // "20: 30" -> "20:30"
   return l.trim();
 }
 
@@ -1051,7 +1052,9 @@ function parsePlanningOcr(texte) {
   const alertes = [];
 
   // Période "Du 06/07/2026 au 12/07/2026" -> semaine cible
-  const mPeriode = texte.match(/[Dd]u\s+(\d{2})\/(\d{2})\/(\d{4})\s+au\s+(\d{2})\/(\d{2})\/(\d{4})/);
+  // \W (au lieu de \s) autour de "Du"/"au" : l'OCR remplace parfois l'espace
+  // par de la ponctuation parasite ("Du.20/07", "DU:20/07")
+  const mPeriode = texte.match(/[Dd]u\W{0,3}(\d{2})\/(\d{2})\/(\d{4})\W*au\W*(\d{2})\/(\d{2})\/(\d{4})/);
   let lundiImport = null;
   if (mPeriode) {
     lundiImport = getMonday(new Date(`${mPeriode[3]}-${mPeriode[2]}-${mPeriode[1]}T00:00:00`));
@@ -1067,11 +1070,25 @@ function parsePlanningOcr(texte) {
   // différents à chaque lecture. On cherche donc le motif jour+numéro où
   // qu'il apparaisse dans la ligne plutôt que d'exiger un début de ligne
   // parfaitement propre.
-  const regexJour = /([LMJVSD])\s+(\d{1,2})\s+(.*)/;
+  // Ancré en début de LIGNE ("^"), mais tolère jusqu'à 6 caractères parasites
+  // avant la lettre du jour (les prefixes observés : "NY]", "[", "{|_",
+  // "ANS", "MAN]"... font tous 5 caractères ou moins). Contrairement à un
+  // motif totalement libre (sans "^"), ça évite d'accrocher un faux jour
+  // au milieu d'une ligne bruitée (source du doublon sur lundi).
+  // Le séparateur entre le numéro du jour et la suite tolère aussi un "/"
+  // parasite (ex: OCR de "25 09:15" lu "25/09:15")
+  // Le marqueur de jour tolère n'importe quel petit groupe de lettres (pas
+  // seulement L/M/J/V/S/D) : le numéro qui suit permet quand même de placer
+  // le jour via resoudreDayIndex, même si la lettre elle-même est mal lue
+  // (ex: "D" lu "ns"). On exclut la ligne d'en-tête ("Du...au...") de cette
+  // recherche élargie, sinon des fragments comme "au 26/07/2026" pourraient
+  // eux-mêmes ressembler à un faux jour.
+  const regexJour = /^.{0,6}?([A-Za-zÀ-ÿ]{1,3})\s+(\d{1,2})[\s/]+(.*)/;
   const regexCreneau = /(\d{1,2}:\d{2})\s*[-–—]\s*(\d{1,2}:\d{2})\s*([A-ZÀ-Ü][A-ZÀ-Ü0-9]{1,15})?/g;
 
   let ordreM = 0; // dernier recours seulement, si le numéro ne permet pas de trancher
   for (const brute of texte.split('\n')) {
+    if (mPeriode && brute.includes(mPeriode[0])) continue; // déjà traitée séparément
     const ligne = corrigerLigneOcr(brute);
     const m = ligne.match(regexJour);
     if (!m) continue;
