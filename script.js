@@ -1088,8 +1088,12 @@ function parsePlanningOcr(texte) {
 
   let ordreM = 0; // dernier recours seulement, si le numéro ne permet pas de trancher
   for (const brute of texte.split('\n')) {
-    if (mPeriode && brute.includes(mPeriode[0])) continue; // déjà traitée séparément
-    const ligne = corrigerLigneOcr(brute);
+    // Retire seulement le morceau "Du...au..." s'il est présent (au lieu de
+    // jeter toute la ligne) : si l'OCR colle l'en-tête et la ligne de lundi
+    // sur une même ligne de texte, sans ce retrait ciblé on perdrait lundi
+    // en même temps que l'en-tête.
+    const sansEntete = mPeriode ? brute.replace(mPeriode[0], '') : brute;
+    const ligne = corrigerLigneOcr(sansEntete);
     const m = ligne.match(regexJour);
     if (!m) continue;
 
