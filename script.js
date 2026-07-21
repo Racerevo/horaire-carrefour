@@ -1,11 +1,12 @@
 // ============================================================
-// HORAIRE CARREFOUR — script.js (Phase 1 : Supabase Auth)
+// HORAIRE CARREFOUR — script.js (Phase 1 : Auth, Phase 2a : Groupes)
 // Changements vs l'ancienne version :
 //   - Plus de mots de passe en clair dans le code (faille corrigée)
 //   - Inscription en autonomie (email + mdp + code équipe)
 //   - Validation admin obligatoire avant d'accéder à l'app
-//   - Liste des employés chargée depuis la table profiles
-// Tout le reste (planning, vue partagée, chat, push) est conservé.
+//   - Fini le planning "tout le monde voit tout le monde" : la visibilité
+//     passe par les GROUPES (demande pour rejoindre, obligatoire une fois
+//     dedans). Le chat global devient un chat par groupe, façon WhatsApp.
 // ============================================================
 
 const SUPABASE_URL = 'https://xbicuvlltztukvkibzxe.supabase.co';
@@ -19,15 +20,23 @@ const today = new Date();
 const mondayStart = getMonday(today);
 let currentWeek = loadWeekStart() || mondayStart;
 
-let authUser = null;      // { id (uuid), name, color } — même forme qu'avant
+let authUser = null;      // { id (uuid), name } — plus de couleur, plus de ciblage
 let monProfil = null;     // ligne complète de la table profiles
-let profils = [];         // employés approuvés (remplace l'ancien tableau users)
-let selectedUserId = null;
 let editPanelOpen = false;
 let data = {};
-let chatMessages = [];
 let authMode = 'connexion'; // 'connexion' | 'inscription'
 let canalProfilPerso = null;
+
+// --- État Groupes ---
+let mesGroupes = [];          // groupes où je suis 'membre' : { id, nom, nbDemandes }
+let groupesDisponibles = [];  // groupes où je ne suis pas encore (avec statut 'demande' éventuel)
+let groupeOuvert = null;      // { id, nom } du groupe actuellement affiché en détail
+let groupeOngletActif = 'chat'; // 'chat' | 'planning'
+let groupeMembresCache = [];   // profils des membres du groupe ouvert
+let groupeDemandesCache = [];  // profils en attente de validation dans ce groupe
+let groupeMessagesCache = [];  // messages du groupe ouvert
+let canalGroupeMessages = null;
+let canalGroupeMembres = null;
 
 const elements = {
   loginScreen: document.getElementById('login-screen'),
@@ -55,7 +64,6 @@ const elements = {
   weekLabel: document.getElementById('week-label'),
   prevWeek: document.getElementById('prev-week'),
   nextWeek: document.getElementById('next-week'),
-  userList: document.getElementById('user-list'),
   adminBlock: document.getElementById('admin-block'),
   adminDemandes: document.getElementById('admin-demandes'),
   adminCount: document.getElementById('admin-count'),
@@ -65,8 +73,6 @@ const elements = {
   scheduleGrid: document.getElementById('schedule-grid'),
   editPanel: document.getElementById('edit-panel'),
   toggleEditPanel: document.getElementById('toggle-edit-panel'),
-  sharedGrid: document.getElementById('shared-grid'),
-  overlapSummary: document.getElementById('overlap-summary'),
   importButton: document.getElementById('import-photo-button'),
   importInput: document.getElementById('import-photo-input'),
   importModal: document.getElementById('import-modal'),
@@ -81,13 +87,25 @@ const elements = {
   importJours: document.getElementById('import-jours'),
   importValider: document.getElementById('import-valider'),
   importRetry: document.getElementById('import-retry'),
-  chatFloat: document.getElementById('chat-float'),
-  chatToggle: document.getElementById('chat-toggle'),
-  chatPanel: document.getElementById('chat-panel'),
-  chatClose: document.getElementById('chat-close'),
-  chatMessages: document.getElementById('chat-messages'),
-  chatForm: document.getElementById('chat-form'),
-  chatInput: document.getElementById('chat-input')
+  // Groupes
+  mesGroupesListe: document.getElementById('mes-groupes-liste'),
+  mesGroupesVide: document.getElementById('mes-groupes-vide'),
+  groupesDisponiblesListe: document.getElementById('groupes-disponibles-liste'),
+  creerGroupeForm: document.getElementById('creer-groupe-form'),
+  creerGroupeNom: document.getElementById('creer-groupe-nom'),
+  groupeDetailOverlay: document.getElementById('groupe-detail-overlay'),
+  groupeDetailNom: document.getElementById('groupe-detail-nom'),
+  groupeDetailBack: document.getElementById('groupe-detail-back'),
+  groupeDetailClose: document.getElementById('groupe-detail-close'),
+  groupeTabChat: document.getElementById('groupe-tab-chat'),
+  groupeTabPlanning: document.getElementById('groupe-tab-planning'),
+  groupeDemandes: document.getElementById('groupe-demandes'),
+  groupeMessages: document.getElementById('groupe-messages'),
+  groupeChatForm: document.getElementById('groupe-chat-form'),
+  groupeChatInput: document.getElementById('groupe-chat-input'),
+  groupePlanningGrid: document.getElementById('groupe-planning-grid'),
+  groupePlanningSummary: document.getElementById('groupe-planning-summary'),
+  groupeQuitter: document.getElementById('groupe-quitter')
 };
 
 // ============================================================
@@ -125,11 +143,9 @@ async function router(session) {
     id: monProfil.id,
     name: monProfil.nom || monProfil.email
   };
-  selectedUserId = selectedUserId || authUser.id;
 
-  profils = await chargerProfils();
   data = await loadData();
-  chatMessages = await loadChat();
+  await chargerGroupes();
   showApp();
   setupRealtime();
 }
@@ -142,20 +158,6 @@ async function chargerMonProfil(userId) {
     .single();
   if (error) { console.error(error); return null; }
   return profil;
-}
-
-async function chargerProfils() {
-  const { data: rows, error } = await supabaseClient
-    .from('profiles')
-    .select('id, nom, email, role')
-    .eq('statut', 'approuve')
-    .order('nom');
-  if (error) { console.error(error); return []; }
-  return rows.map(p => ({
-    id: p.id,
-    name: p.nom || p.email,
-    role: p.role
-  }));
 }
 
 // Écoute MON profil : dès que l'admin accepte, l'app s'ouvre toute seule
@@ -183,29 +185,27 @@ function setupRealtime() {
       data = await loadData();
       if (authUser) {
         renderSchedule();
-        renderSharedSchedule();
+        if (groupeOuvert && groupeOngletActif === 'planning') renderPlanningGroupe();
       }
     })
     .subscribe();
 
+  // Groupes créés/renommés/supprimés + demandes/membres qui bougent
   supabaseClient
-    .channel('messages-changes')
-    .on('postgres_changes', { event: '*', schema: 'public', table: 'messages' }, async () => {
-      chatMessages = await loadChat();
-      if (authUser) {
-        renderChat();
-      }
+    .channel('groupes-changes')
+    .on('postgres_changes', { event: '*', schema: 'public', table: 'groupes' }, () => authUser && chargerGroupes())
+    .on('postgres_changes', { event: '*', schema: 'public', table: 'groupe_membres' }, async () => {
+      if (!authUser) return;
+      await chargerGroupes();
+      if (groupeOuvert) await chargerMembresGroupe(groupeOuvert.id);
     })
     .subscribe();
 
-  // Nouveaux profils (demandes) + validations → met à jour listes et badge admin
+  // Nouveaux profils (demandes de compte) + validations → badge admin
   supabaseClient
     .channel('profiles-changes')
     .on('postgres_changes', { event: '*', schema: 'public', table: 'profiles' }, async () => {
       if (!authUser) return;
-      profils = await chargerProfils();
-      renderUsers();
-      renderSharedSchedule();
       if (monProfil?.role === 'admin') renderDemandes();
     })
     .subscribe();
@@ -224,9 +224,6 @@ function bindEvents() {
   elements.enablePush.addEventListener('click', activerPush);
   elements.prevWeek.addEventListener('click', () => changeWeek(-1));
   elements.nextWeek.addEventListener('click', () => changeWeek(1));
-  elements.chatToggle.addEventListener('click', toggleChat);
-  elements.chatClose.addEventListener('click', toggleChat);
-  elements.chatForm.addEventListener('submit', handleChatSubmit);
   elements.importButton?.addEventListener('click', () => elements.importInput.click());
   elements.importInput?.addEventListener('change', analyserPhotoPlanning);
   elements.importClose?.addEventListener('click', fermerImport);
@@ -239,11 +236,19 @@ function bindEvents() {
     editPanelOpen = !editPanelOpen;
     renderSchedule();
   });
+  elements.creerGroupeForm.addEventListener('submit', handleCreerGroupe);
+  elements.groupeDetailBack.addEventListener('click', fermerGroupe);
+  elements.groupeDetailClose.addEventListener('click', fermerGroupe);
+  elements.groupeChatForm.addEventListener('submit', handleEnvoyerMessageGroupe);
+  elements.groupeQuitter.addEventListener('click', handleQuitterGroupe);
+  document.querySelectorAll('.groupe-tab').forEach(tab => {
+    tab.addEventListener('click', () => basculerOngletGroupe(tab.dataset.tab));
+  });
   document.querySelectorAll('.mobile-tabs .tab').forEach(tab => {
     tab.addEventListener('click', () => {
       const view = tab.dataset.view;
       const workspace = document.getElementById('workspace');
-      workspace.classList.remove('view-planning', 'view-shared', 'view-employees');
+      workspace.classList.remove('view-planning', 'view-groupes');
       workspace.classList.add(`view-${view}`);
       document.querySelectorAll('.mobile-tabs .tab').forEach(t => t.classList.remove('active'));
       tab.classList.add('active');
@@ -331,7 +336,9 @@ async function handleLogout() {
   await supabaseClient.auth.signOut();
   authUser = null;
   monProfil = null;
-  selectedUserId = null;
+  fermerGroupe();
+  mesGroupes = [];
+  groupesDisponibles = [];
   showLogin();
 }
 
@@ -347,13 +354,11 @@ function montrer(ecran) {
 
 function showLogin() {
   montrer(elements.loginScreen);
-  elements.chatFloat.classList.add('hidden');
   elements.loginError.classList.add('hidden');
 }
 
 function showPending() {
   montrer(elements.pendingScreen);
-  elements.chatFloat.classList.add('hidden');
   const refuse = monProfil?.statut === 'refuse';
   elements.pendingIcon.textContent = refuse ? '🚫' : '⏳';
   elements.pendingTitle.textContent = refuse ? 'Demande refusée' : 'Demande envoyée !';
@@ -365,13 +370,10 @@ function showPending() {
 
 function showApp() {
   montrer(elements.appScreen);
-  elements.chatFloat.classList.remove('hidden');
   elements.welcomeText.textContent = `Connecté en tant que ${authUser.name}`;
-  renderUsers();
   renderWeek();
   renderSchedule();
-  renderSharedSchedule();
-  renderChat();
+  renderGroupesListes();
   if (monProfil?.role === 'admin') {
     elements.adminBlock.classList.remove('hidden');
     renderDemandes();
@@ -513,7 +515,7 @@ function changeWeek(direction) {
   saveWeekStart(currentWeek);
   renderWeek();
   renderSchedule();
-  renderSharedSchedule();
+  if (groupeOuvert && groupeOngletActif === 'planning') renderPlanningGroupe();
 }
 
 function renderWeek() {
@@ -521,38 +523,9 @@ function renderWeek() {
   elements.weekLabel.textContent = `${formatDate(currentWeek)} → ${formatDate(end)}`;
 }
 
-function renderUsers() {
-  elements.userList.innerHTML = '';
-  profils.forEach(user => {
-    const item = document.createElement('li');
-    item.className = `user-item${selectedUserId === user.id ? ' active' : ''}`;
-    const title = document.createElement('span');
-    const strong = document.createElement('strong');
-    strong.textContent = user.name;
-    title.appendChild(strong);
-    item.appendChild(title);
-    const viewButton = document.createElement('button');
-    viewButton.textContent = 'Voir';
-    viewButton.addEventListener('click', () => {
-      selectedUserId = user.id;
-      renderUsers();
-      renderSchedule();
-      if (window.matchMedia('(max-width: 860px)').matches) {
-        document.querySelector('.mobile-tabs .tab[data-view="planning"]')?.click();
-      }
-    });
-    item.appendChild(viewButton);
-    elements.userList.appendChild(item);
-  });
-}
-
 function renderSchedule() {
-  const user = profils.find(u => u.id === selectedUserId) ||
-    (selectedUserId === authUser?.id ? authUser : null);
-  if (!user) return;
-  elements.scheduleTitle.textContent = `Emploi du temps de ${user.name}`;
-  const editable = authUser && authUser.id === selectedUserId;
-  renderEditToggle(editable);
+  elements.scheduleTitle.textContent = 'Emploi du temps';
+  renderEditToggle(true);
   const weekDays = generateWeekDays(currentWeek);
   elements.weekDays.innerHTML = '';
   weekDays.forEach(day => {
@@ -562,7 +535,7 @@ function renderSchedule() {
     elements.weekDays.appendChild(card);
   });
   const weekKey = getWeekKey(currentWeek);
-  const events = data[weekKey]?.[user.id] || [];
+  const events = data[weekKey]?.[authUser.id] || [];
   elements.scheduleGrid.innerHTML = '';
   for (let index = 0; index < 7; index += 1) {
     const dayColumn = document.createElement('div');
@@ -590,19 +563,17 @@ function renderSchedule() {
         meta.appendChild(plage);
         card.appendChild(titre);
         card.appendChild(meta);
-        if (authUser && authUser.id === user.id) {
-          const actions = document.createElement('div');
-          actions.className = 'event-actions';
-          const editBtn = document.createElement('button');
-          editBtn.textContent = 'Modifier';
-          editBtn.addEventListener('click', () => showEditForm(event.id));
-          const deleteBtn = document.createElement('button');
-          deleteBtn.textContent = 'Supprimer';
-          deleteBtn.addEventListener('click', () => deleteEvent(event.id));
-          actions.appendChild(editBtn);
-          actions.appendChild(deleteBtn);
-          card.appendChild(actions);
-        }
+        const actions = document.createElement('div');
+        actions.className = 'event-actions';
+        const editBtn = document.createElement('button');
+        editBtn.textContent = 'Modifier';
+        editBtn.addEventListener('click', () => showEditForm(event.id));
+        const deleteBtn = document.createElement('button');
+        deleteBtn.textContent = 'Supprimer';
+        deleteBtn.addEventListener('click', () => deleteEvent(event.id));
+        actions.appendChild(editBtn);
+        actions.appendChild(deleteBtn);
+        card.appendChild(actions);
         dayColumn.appendChild(card);
       });
     }
@@ -625,12 +596,6 @@ function renderEditToggle(editable) {
 }
 
 function renderEditPanel(events) {
-  const editable = authUser && authUser.id === selectedUserId;
-  if (!editable) {
-    elements.editPanel.classList.add('hidden');
-    elements.editPanel.innerHTML = `<p>Vous pouvez afficher le planning des autres employés mais seul votre planning peut être modifié.</p>`;
-    return;
-  }
   if (!editPanelOpen) {
     elements.editPanel.classList.add('hidden');
     elements.editPanel.innerHTML = `<p>Appuyez sur "Modifier l'emploi du temps" pour ajouter ou changer une plage horaire.</p>`;
@@ -703,7 +668,7 @@ async function handleEventSubmit(event) {
   editPanelOpen = false;
   resetEditForm();
   renderSchedule();
-  renderSharedSchedule();
+  if (groupeOuvert && groupeOngletActif === 'planning') renderPlanningGroupe();
 }
 
 function showEditForm(eventId) {
@@ -736,14 +701,300 @@ async function deleteEvent(eventId) {
   await removeEvent(eventId);
   data = await loadData();
   renderSchedule();
-  renderSharedSchedule();
+  if (groupeOuvert && groupeOngletActif === 'planning') renderPlanningGroupe();
 }
 
-function renderSharedSchedule() {
+// ============================================================
+// GROUPES — liste, demandes, détail (chat façon WhatsApp + planning)
+// ============================================================
+
+async function chargerGroupes() {
+  // Toutes les lignes groupe_membres où JE figure (mes 'membre' + mes 'demande')
+  const { data: mesLignes, error: err1 } = await supabaseClient
+    .from('groupe_membres')
+    .select('groupe_id, statut')
+    .eq('user_id', authUser.id);
+  if (err1) { console.error(err1); return; }
+
+  const idsMembre = mesLignes.filter(l => l.statut === 'membre').map(l => l.groupe_id);
+  const idsDemandeEnCours = new Set(mesLignes.filter(l => l.statut === 'demande').map(l => l.groupe_id));
+
+  // Tous les groupes (annuaire) — pour la liste "Découvrir"
+  const { data: tousLesGroupes, error: err2 } = await supabaseClient
+    .from('groupes')
+    .select('id, nom, createur_id')
+    .order('nom');
+  if (err2) { console.error(err2); return; }
+
+  // Nombre de demandes en attente, pour CHAQUE groupe où je suis membre
+  let demandesParGroupe = {};
+  if (idsMembre.length > 0) {
+    const { data: demandesRows } = await supabaseClient
+      .from('groupe_membres')
+      .select('groupe_id')
+      .eq('statut', 'demande')
+      .in('groupe_id', idsMembre);
+    (demandesRows ?? []).forEach(r => {
+      demandesParGroupe[r.groupe_id] = (demandesParGroupe[r.groupe_id] || 0) + 1;
+    });
+  }
+
+  mesGroupes = tousLesGroupes
+    .filter(g => idsMembre.includes(g.id))
+    .map(g => ({ id: g.id, nom: g.nom, nbDemandes: demandesParGroupe[g.id] || 0 }));
+
+  groupesDisponibles = tousLesGroupes
+    .filter(g => !idsMembre.includes(g.id))
+    .map(g => ({ id: g.id, nom: g.nom, demandeEnCours: idsDemandeEnCours.has(g.id) }));
+
+  renderGroupesListes();
+}
+
+function renderGroupesListes() {
+  elements.mesGroupesListe.innerHTML = '';
+  elements.mesGroupesVide.classList.toggle('hidden', mesGroupes.length > 0);
+  mesGroupes.forEach(g => {
+    const li = document.createElement('li');
+    const carte = document.createElement('button');
+    carte.type = 'button';
+    carte.className = 'groupe-carte';
+    const nomBloc = document.createElement('span');
+    nomBloc.className = 'groupe-carte-nom';
+    nomBloc.innerHTML = `<strong>${escapeHtml(g.nom)}</strong>`;
+    carte.appendChild(nomBloc);
+    if (g.nbDemandes > 0) {
+      const badge = document.createElement('span');
+      badge.className = 'groupe-carte-badge';
+      badge.textContent = g.nbDemandes;
+      carte.appendChild(badge);
+    }
+    carte.addEventListener('click', () => ouvrirGroupe(g.id, g.nom));
+    li.appendChild(carte);
+    elements.mesGroupesListe.appendChild(li);
+  });
+
+  elements.groupesDisponiblesListe.innerHTML = '';
+  groupesDisponibles.forEach(g => {
+    const li = document.createElement('li');
+    const carte = document.createElement('div');
+    carte.className = 'groupe-carte';
+    carte.style.cursor = 'default';
+    const nomBloc = document.createElement('span');
+    nomBloc.className = 'groupe-carte-nom';
+    nomBloc.innerHTML = `<strong>${escapeHtml(g.nom)}</strong>`;
+    carte.appendChild(nomBloc);
+    const btn = document.createElement('button');
+    btn.className = 'groupe-carte-decouvrir';
+    btn.textContent = g.demandeEnCours ? 'Demande envoyée' : 'Demander à rejoindre';
+    btn.disabled = g.demandeEnCours;
+    btn.addEventListener('click', () => demanderRejoindre(g.id));
+    carte.appendChild(btn);
+    li.appendChild(carte);
+    elements.groupesDisponiblesListe.appendChild(li);
+  });
+}
+
+async function handleCreerGroupe(event) {
+  event.preventDefault();
+  const nom = elements.creerGroupeNom.value.trim();
+  if (nom.length < 2) return;
+  const { data: groupe, error } = await supabaseClient
+    .from('groupes')
+    .insert({ nom, createur_id: authUser.id })
+    .select()
+    .single();
+  if (error) { console.error(error); alert('Création impossible. Réessaie.'); return; }
+  const { error: err2 } = await supabaseClient
+    .from('groupe_membres')
+    .insert({ groupe_id: groupe.id, user_id: authUser.id, statut: 'membre' });
+  if (err2) console.error(err2);
+  elements.creerGroupeNom.value = '';
+  await chargerGroupes();
+  ouvrirGroupe(groupe.id, groupe.nom);
+}
+
+async function demanderRejoindre(groupeId) {
+  const { error } = await supabaseClient
+    .from('groupe_membres')
+    .insert({ groupe_id: groupeId, user_id: authUser.id, statut: 'demande' });
+  if (error) { console.error(error); alert("La demande n'a pas pu être envoyée. Réessaie."); return; }
+  await chargerGroupes();
+}
+
+// --- Détail d'un groupe (chat + planning) ---
+
+async function ouvrirGroupe(groupeId, nom) {
+  groupeOuvert = { id: groupeId, nom };
+  groupeOngletActif = 'chat';
+  elements.groupeDetailNom.textContent = nom;
+  elements.groupeDetailOverlay.classList.remove('hidden');
+  basculerOngletGroupe('chat');
+  await chargerMembresGroupe(groupeId);
+  await chargerMessagesGroupe(groupeId);
+  ecouterGroupe(groupeId);
+}
+
+function fermerGroupe() {
+  groupeOuvert = null;
+  elements.groupeDetailOverlay.classList.add('hidden');
+  if (canalGroupeMessages) { supabaseClient.removeChannel(canalGroupeMessages); canalGroupeMessages = null; }
+  if (canalGroupeMembres) { supabaseClient.removeChannel(canalGroupeMembres); canalGroupeMembres = null; }
+}
+
+function basculerOngletGroupe(onglet) {
+  groupeOngletActif = onglet;
+  document.querySelectorAll('.groupe-tab').forEach(t => t.classList.toggle('active', t.dataset.tab === onglet));
+  elements.groupeTabChat.classList.toggle('hidden', onglet !== 'chat');
+  elements.groupeTabPlanning.classList.toggle('hidden', onglet !== 'planning');
+  if (onglet === 'planning') renderPlanningGroupe();
+}
+
+function ecouterGroupe(groupeId) {
+  if (canalGroupeMessages) supabaseClient.removeChannel(canalGroupeMessages);
+  canalGroupeMessages = supabaseClient
+    .channel(`groupe-messages-${groupeId}`)
+    .on('postgres_changes',
+      { event: 'INSERT', schema: 'public', table: 'groupe_messages', filter: `groupe_id=eq.${groupeId}` },
+      async () => { await chargerMessagesGroupe(groupeId); })
+    .subscribe();
+
+  if (canalGroupeMembres) supabaseClient.removeChannel(canalGroupeMembres);
+  canalGroupeMembres = supabaseClient
+    .channel(`groupe-membres-${groupeId}`)
+    .on('postgres_changes',
+      { event: '*', schema: 'public', table: 'groupe_membres', filter: `groupe_id=eq.${groupeId}` },
+      async () => {
+        await chargerMembresGroupe(groupeId);
+        if (groupeOngletActif === 'planning') renderPlanningGroupe();
+      })
+    .subscribe();
+}
+
+async function chargerMembresGroupe(groupeId) {
+  const { data: lignes, error } = await supabaseClient
+    .from('groupe_membres')
+    .select('user_id, statut, profil:profiles(id, nom, email)')
+    .eq('groupe_id', groupeId);
+  if (error) { console.error(error); return; }
+  groupeMembresCache = lignes.filter(l => l.statut === 'membre').map(l => l.profil).filter(Boolean);
+  groupeDemandesCache = lignes.filter(l => l.statut === 'demande').map(l => l.profil).filter(Boolean);
+  renderDemandesGroupe();
+}
+
+function renderDemandesGroupe() {
+  elements.groupeDemandes.classList.toggle('hidden', groupeDemandesCache.length === 0);
+  elements.groupeDemandes.innerHTML = '';
+  groupeDemandesCache.forEach(p => {
+    const item = document.createElement('div');
+    item.className = 'groupe-demande-item';
+    const nom = document.createElement('span');
+    nom.textContent = p.nom || p.email;
+    const actions = document.createElement('div');
+    actions.className = 'demande-actions';
+    const accepter = document.createElement('button');
+    accepter.className = 'demande-accepter';
+    accepter.textContent = 'Accepter';
+    accepter.addEventListener('click', () => validerDemande(p.id));
+    const refuser = document.createElement('button');
+    refuser.className = 'demande-refuser';
+    refuser.textContent = 'Refuser';
+    refuser.addEventListener('click', () => refuserDemande(p.id));
+    actions.appendChild(accepter);
+    actions.appendChild(refuser);
+    item.appendChild(nom);
+    item.appendChild(actions);
+    elements.groupeDemandes.appendChild(item);
+  });
+}
+
+async function validerDemande(userId) {
+  const { error } = await supabaseClient
+    .from('groupe_membres')
+    .update({ statut: 'membre' })
+    .eq('groupe_id', groupeOuvert.id)
+    .eq('user_id', userId);
+  if (error) console.error(error);
+}
+
+async function refuserDemande(userId) {
+  const { error } = await supabaseClient
+    .from('groupe_membres')
+    .delete()
+    .eq('groupe_id', groupeOuvert.id)
+    .eq('user_id', userId);
+  if (error) console.error(error);
+}
+
+async function handleQuitterGroupe() {
+  if (!groupeOuvert) return;
+  if (!confirm(`Quitter le groupe "${groupeOuvert.nom}" ?`)) return;
+  const { error } = await supabaseClient
+    .from('groupe_membres')
+    .delete()
+    .eq('groupe_id', groupeOuvert.id)
+    .eq('user_id', authUser.id);
+  if (error) { console.error(error); alert('Impossible de quitter le groupe. Réessaie.'); return; }
+  fermerGroupe();
+  await chargerGroupes();
+}
+
+// --- Chat du groupe (façon WhatsApp / Instagram) ---
+
+async function chargerMessagesGroupe(groupeId) {
+  const { data: rows, error } = await supabaseClient
+    .from('groupe_messages')
+    .select('id, user_id, message, created_at, auteur:profiles(nom, email)')
+    .eq('groupe_id', groupeId)
+    .order('created_at', { ascending: true })
+    .limit(200);
+  if (error) { console.error(error); return; }
+  groupeMessagesCache = rows;
+  renderMessagesGroupe();
+}
+
+async function handleEnvoyerMessageGroupe(event) {
+  event.preventDefault();
+  if (!groupeOuvert) return;
+  const texte = elements.groupeChatInput.value.trim();
+  if (!texte) return;
+  elements.groupeChatInput.value = '';
+  const { error } = await supabaseClient
+    .from('groupe_messages')
+    .insert({ groupe_id: groupeOuvert.id, user_id: authUser.id, message: texte });
+  if (error) console.error(error);
+}
+
+function renderMessagesGroupe() {
+  elements.groupeMessages.innerHTML = '';
+  groupeMessagesCache.forEach(m => {
+    const estMoi = m.user_id === authUser.id;
+    const bulle = document.createElement('div');
+    bulle.className = `wa-bulle ${estMoi ? 'wa-bulle-moi' : 'wa-bulle-autre'}`;
+    const auteur = document.createElement('span');
+    auteur.className = 'wa-auteur';
+    auteur.textContent = m.auteur?.nom || m.auteur?.email || '…';
+    const texte = document.createElement('p');
+    texte.className = 'wa-texte';
+    texte.textContent = m.message;
+    const heure = document.createElement('span');
+    heure.className = 'wa-heure';
+    heure.textContent = formatTime(m.created_at);
+    bulle.appendChild(auteur);
+    bulle.appendChild(texte);
+    bulle.appendChild(heure);
+    elements.groupeMessages.appendChild(bulle);
+  });
+  elements.groupeMessages.scrollTop = elements.groupeMessages.scrollHeight;
+}
+
+// --- Planning du groupe (uniquement ses membres) ---
+
+function renderPlanningGroupe() {
   const weekDays = generateWeekDays(currentWeek);
-  elements.sharedGrid.innerHTML = '';
+  elements.groupePlanningGrid.innerHTML = '';
   const weekKey = getWeekKey(currentWeek);
   const totalsByDay = Array(7).fill(0);
+
   const headerRow = document.createElement('div');
   headerRow.className = 'shared-row shared-header';
   const corner = document.createElement('div');
@@ -755,15 +1006,16 @@ function renderSharedSchedule() {
     cell.innerHTML = `<strong>${day.label}</strong><span>${day.date}</span>`;
     headerRow.appendChild(cell);
   });
-  elements.sharedGrid.appendChild(headerRow);
-  profils.forEach(user => {
+  elements.groupePlanningGrid.appendChild(headerRow);
+
+  groupeMembresCache.forEach(membre => {
     const row = document.createElement('div');
     row.className = 'shared-row';
     const title = document.createElement('div');
     title.className = 'person-name';
-    title.textContent = user.name;
+    title.textContent = membre.id === authUser.id ? `${membre.nom || membre.email} (toi)` : (membre.nom || membre.email);
     row.appendChild(title);
-    const events = data[weekKey]?.[user.id] || [];
+    const events = data[weekKey]?.[membre.id] || [];
     for (let dayIndex = 0; dayIndex < 7; dayIndex += 1) {
       const cell = document.createElement('div');
       cell.className = 'shared-cell';
@@ -783,56 +1035,21 @@ function renderSharedSchedule() {
       }
       row.appendChild(cell);
     }
-    elements.sharedGrid.appendChild(row);
+    elements.groupePlanningGrid.appendChild(row);
   });
-  elements.overlapSummary.innerHTML = `
-    <p class="summary-caption">Employés actifs par jour</p>
+
+  elements.groupePlanningSummary.innerHTML = `
+    <p class="summary-caption">Membres actifs par jour</p>
     <div class="summary-chips">
       ${totalsByDay.map((count, index) => `<span class="summary-chip"><strong>${weekDays[index].label}</strong>${count}</span>`).join('')}
     </div>
   `;
 }
 
-// ============================================================
-// CHAT (logique d'origine conservée)
-// ============================================================
-
-function toggleChat() {
-  const nowHidden = elements.chatPanel.classList.toggle('hidden');
-  document.body.classList.toggle('chat-open', !nowHidden);
-  if (!nowHidden) {
-    elements.chatMessages.scrollTop = elements.chatMessages.scrollHeight;
-  }
-}
-
-async function handleChatSubmit(event) {
-  event.preventDefault();
-  const message = elements.chatInput.value.trim();
-  if (!message) return;
-  const author = authUser ? authUser.name : 'Invité';
-  await sendMessage(author, message);
-  elements.chatInput.value = '';
-}
-
-function renderChat() {
-  elements.chatMessages.innerHTML = '';
-  chatMessages.slice(-40).forEach(item => {
-    const bubble = document.createElement('div');
-    bubble.className = 'chat-bubble';
-    const author = document.createElement('strong');
-    author.textContent = item.author;
-    const text = document.createElement('p');
-    text.className = 'chat-text';
-    text.textContent = item.message;
-    const stamp = document.createElement('small');
-    stamp.className = 'chat-stamp';
-    stamp.textContent = formatStamp(item.stamp);
-    bubble.appendChild(author);
-    bubble.appendChild(text);
-    bubble.appendChild(stamp);
-    elements.chatMessages.appendChild(bubble);
-  });
-  elements.chatMessages.scrollTop = elements.chatMessages.scrollHeight;
+function escapeHtml(str) {
+  const div = document.createElement('div');
+  div.textContent = str ?? '';
+  return div.innerHTML;
 }
 
 function formatStamp(iso) {
@@ -878,24 +1095,6 @@ async function saveEvent(weekKey, userId, event) {
 
 async function removeEvent(eventId) {
   const { error } = await supabaseClient.from('events').delete().eq('id', eventId);
-  if (error) console.error(error);
-}
-
-async function loadChat() {
-  // Purge des messages > 48h (la RLS n'autorise que ceux-là à la suppression)
-  const cutoff = new Date(Date.now() - 48 * 60 * 60 * 1000).toISOString();
-  await supabaseClient.from('messages').delete().lt('created_at', cutoff);
-  const { data: rows, error } = await supabaseClient
-    .from('messages')
-    .select('*')
-    .order('created_at', { ascending: true })
-    .limit(100);
-  if (error) { console.error(error); return []; }
-  return rows.map(row => ({ author: row.author, message: row.message, stamp: row.created_at }));
-}
-
-async function sendMessage(author, message) {
-  const { error } = await supabaseClient.from('messages').insert({ author, message });
   if (error) console.error(error);
 }
 
@@ -1408,7 +1607,7 @@ async function validerImport() {
     fermerImport();
     renderWeek();
     renderSchedule();
-    renderSharedSchedule();
+    if (groupeOuvert && groupeOngletActif === 'planning') renderPlanningGroupe();
   } catch (err) {
     console.error('Validation import :', err);
     alert("L'enregistrement a échoué. Vérifie ta connexion et réessaie.");

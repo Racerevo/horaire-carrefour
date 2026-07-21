@@ -1,4 +1,4 @@
-const CACHE_NAME = 'horaire-carrefour-v17';
+const CACHE_NAME = 'horaire-carrefour-v18';
 const APP_SHELL = [
   './',
   './index.html',

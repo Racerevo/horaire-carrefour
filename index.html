@@ -99,21 +99,24 @@
             <ul id="admin-demandes" class="user-list"></ul>
           </div>
 
-          <div class="panel-title">Employés</div>
-          <ul id="user-list" class="user-list"></ul>
+          <div class="panel-title">Mes groupes</div>
+          <ul id="mes-groupes-liste" class="user-list groupes-liste"></ul>
+          <p id="mes-groupes-vide" class="groupes-vide hidden">
+            Rejoins un groupe ci-dessous, ou envoie une demande de message pour démarrer un chat.
+          </p>
+
+          <div class="panel-title">Découvrir des groupes</div>
+          <ul id="groupes-disponibles-liste" class="user-list groupes-liste"></ul>
+
+          <form id="creer-groupe-form" class="creer-groupe-form">
+            <input type="text" id="creer-groupe-nom" placeholder='Nom du groupe (ex : "Caisses matin")' />
+            <button type="submit" class="button secondary">+ Créer un groupe</button>
+          </form>
 
           <button id="enable-push" class="button secondary hidden">🔔 Activer les notifications</button>
         </aside>
 
         <main class="main-content">
-          <section class="shared-panel">
-            <div class="section-title">
-              <h2>Emploi du temps partagé</h2>
-            </div>
-            <div id="shared-grid" class="shared-grid"></div>
-            <div class="shared-summary" id="overlap-summary"></div>
-          </section>
-
           <section class="schedule-panel">
             <div class="section-title">
               <h2 id="schedule-title">Emploi du temps</h2>
@@ -135,26 +138,43 @@
       </div>
       <nav class="mobile-tabs">
         <button data-view="planning" class="tab active">📅<span>Planning</span></button>
-        <button data-view="shared" class="tab">👥<span>Partagé</span></button>
-        <button data-view="employees" class="tab">☰<span>Employés</span></button>
+        <button data-view="groupes" class="tab">👥<span>Groupes</span></button>
       </nav>
     </section>
   </div>
 
-  <div class="chat-float hidden" id="chat-float">
-    <button id="chat-toggle" class="chat-bubble-toggle" aria-label="Ouvrir le chat">💬</button>
-    <div id="chat-panel" class="chat-panel hidden">
-      <div class="chat-header">
-        <h3>Discussion partagée</h3>
-        <button id="chat-close" class="icon-button">✕</button>
+  <!-- ======== DÉTAIL D'UN GROUPE (chat + planning des membres) ======== -->
+  <div id="groupe-detail-overlay" class="import-overlay hidden">
+    <div class="import-box groupe-detail-box">
+      <div class="import-header">
+        <button id="groupe-detail-back" class="import-lien">‹ Groupes</button>
+        <h3 id="groupe-detail-nom">Groupe</h3>
+        <button id="groupe-detail-close" class="icon-button" aria-label="Fermer">✕</button>
       </div>
-      <div id="chat-messages" class="chat-messages"></div>
-      <form id="chat-form" class="chat-form">
-        <input id="chat-input" type="text" placeholder="Écrire un message..." autocomplete="off" required />
-        <button type="submit" class="button primary">Envoyer</button>
-      </form>
+
+      <div class="groupe-tabs" role="tablist">
+        <button type="button" data-tab="chat" class="groupe-tab active" role="tab">💬 Chat</button>
+        <button type="button" data-tab="planning" class="groupe-tab" role="tab">📅 Planning</button>
+      </div>
+
+      <div id="groupe-tab-chat" class="groupe-tab-panel">
+        <div id="groupe-demandes" class="groupe-demandes hidden"></div>
+        <div id="groupe-messages" class="chat-messages groupe-chat-messages"></div>
+        <form id="groupe-chat-form" class="chat-form">
+          <input id="groupe-chat-input" type="text" placeholder="Écrire un message..." autocomplete="off" required />
+          <button type="submit" class="button primary">Envoyer</button>
+        </form>
+      </div>
+
+      <div id="groupe-tab-planning" class="groupe-tab-panel hidden">
+        <div id="groupe-planning-grid" class="shared-grid"></div>
+        <div class="shared-summary" id="groupe-planning-summary"></div>
+      </div>
+
+      <button id="groupe-quitter" class="button secondary groupe-quitter">Quitter le groupe</button>
     </div>
   </div>
+
   <div id="import-modal" class="import-overlay hidden">
     <div class="import-box">
       <div class="import-header">

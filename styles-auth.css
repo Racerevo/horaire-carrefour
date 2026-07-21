@@ -247,3 +247,169 @@
   font-size: 0.88rem;
   padding: 2px 0;
 }
+
+/* ============ Groupes (remplace Employés + planning partagé) ============ */
+.groupes-liste { margin-bottom: 8px; }
+.groupes-vide {
+  color: #64748b;
+  font-size: 0.85rem;
+  line-height: 1.5;
+  margin: 0 0 16px;
+}
+.groupe-carte {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 10px;
+  padding: 14px 16px;
+  border-radius: 18px;
+  background: #0f172a;
+  border: 1px solid transparent;
+  cursor: pointer;
+  transition: border-color 0.2s ease;
+}
+.groupe-carte:hover { border-color: rgba(96, 165, 250, 0.4); }
+.groupe-carte-nom { display: flex; flex-direction: column; gap: 2px; text-align: left; }
+.groupe-carte-nom small { color: #94a3b8; font-size: 0.78rem; }
+.groupe-carte-badge {
+  background: #dc2626;
+  color: white;
+  font-size: 0.72rem;
+  font-weight: 700;
+  padding: 2px 8px;
+  border-radius: 999px;
+}
+.groupe-carte-decouvrir {
+  background: transparent;
+  border: none;
+  color: #60a5fa;
+  font-weight: 700;
+  font-size: 0.82rem;
+  padding: 8px 12px;
+  border-radius: 12px;
+}
+.groupe-carte-decouvrir:disabled { color: #64748b; }
+
+.creer-groupe-form {
+  display: grid;
+  gap: 8px;
+  margin: 6px 0 16px;
+}
+.creer-groupe-form input {
+  width: 100%;
+  border: 1px solid #334155;
+  border-radius: 14px;
+  background: #0f172a;
+  color: #e2e8f0;
+  padding: 12px 14px;
+}
+
+/* Détail d'un groupe : entête + onglets Chat / Planning */
+.groupe-detail-box {
+  width: min(640px, 100%);
+  height: min(88vh, 780px);
+  display: grid;
+  grid-template-rows: auto auto 1fr auto;
+  padding: 16px;
+}
+.groupe-detail-box .import-header h3 { flex: 1; text-align: center; }
+.import-lien {
+  border: none;
+  background: none;
+  color: #60a5fa;
+  font-weight: 600;
+  font-size: 0.9rem;
+  padding: 6px 4px;
+}
+.groupe-tabs {
+  display: flex;
+  background: #0f172a;
+  border-radius: 14px;
+  padding: 4px;
+  gap: 4px;
+}
+.groupe-tab {
+  flex: 1;
+  border: none;
+  background: transparent;
+  color: #94a3b8;
+  font-weight: 600;
+  padding: 10px;
+  border-radius: 10px;
+}
+.groupe-tab.active { background: #1f2937; color: #60a5fa; }
+.groupe-tab-panel {
+  min-height: 0;
+  display: flex;
+  flex-direction: column;
+  gap: 10px;
+  overflow: hidden;
+}
+#groupe-tab-planning.groupe-tab-panel { overflow-y: auto; display: block; }
+
+/* Demandes en attente à l'intérieur d'un groupe */
+.groupe-demandes {
+  background: rgba(37, 99, 235, 0.08);
+  border: 1px solid rgba(37, 99, 235, 0.3);
+  border-radius: 16px;
+  padding: 10px;
+  display: grid;
+  gap: 8px;
+  max-height: 30%;
+  overflow-y: auto;
+  flex-shrink: 0;
+}
+.groupe-demande-item {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 8px;
+  font-size: 0.88rem;
+}
+.groupe-demande-item .demande-actions { flex-shrink: 0; }
+.groupe-demande-item .demande-actions button { padding: 6px 10px; font-size: 0.82rem; }
+
+/* Chat façon WhatsApp/Instagram : bulles alignées selon l'expéditeur */
+.groupe-chat-messages {
+  flex: 1;
+  min-height: 0;
+  overflow-y: auto;
+  display: flex;
+  flex-direction: column;
+  gap: 6px;
+  padding: 10px 4px;
+}
+.wa-bulle {
+  max-width: 78%;
+  padding: 9px 13px;
+  border-radius: 16px;
+  display: flex;
+  flex-direction: column;
+  gap: 2px;
+}
+.wa-bulle-autre {
+  align-self: flex-start;
+  background: #1f2937;
+  border-bottom-left-radius: 4px;
+}
+.wa-bulle-moi {
+  align-self: flex-end;
+  background: #2563eb;
+  border-bottom-right-radius: 4px;
+}
+.wa-auteur { font-size: 0.76rem; font-weight: 700; color: #60a5fa; }
+.wa-bulle-moi .wa-auteur { display: none; }
+.wa-texte { margin: 0; word-break: break-word; color: #e2e8f0; }
+.wa-heure { align-self: flex-end; font-size: 0.68rem; color: rgba(226, 232, 240, 0.6); margin-top: 2px; }
+
+.groupe-quitter { margin-top: 4px; }
+
+@media (max-width: 860px) {
+  .groupe-detail-box { height: 100dvh; border-radius: 0; }
+}
+
+/* Mobile : sur l'onglet Groupes, on cache le planning perso (view-shared/
+   view-employees existaient avant, remplacés par le seul onglet view-groupes) */
+@media (max-width: 860px) {
+  .workspace.view-groupes .schedule-panel { display: none; }
+}
