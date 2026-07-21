@@ -105,7 +105,27 @@ const elements = {
   groupeChatInput: document.getElementById('groupe-chat-input'),
   groupePlanningGrid: document.getElementById('groupe-planning-grid'),
   groupePlanningSummary: document.getElementById('groupe-planning-summary'),
-  groupeQuitter: document.getElementById('groupe-quitter')
+  groupeQuitter: document.getElementById('groupe-quitter'),
+  // Messages directs (Phase 2b)
+  messagesDemandesBlock: document.getElementById('messages-demandes-block'),
+  messagesDemandesCount: document.getElementById('messages-demandes-count'),
+  messagesRecuesListe: document.getElementById('messages-recues-liste'),
+  messagesConversationsListe: document.getElementById('messages-conversations-liste'),
+  messagesVide: document.getElementById('messages-vide'),
+  messagesEnvoyeesListe: document.getElementById('messages-envoyees-liste'),
+  rechercherPersonneForm: document.getElementById('rechercher-personne-form'),
+  rechercherPersonneInput: document.getElementById('rechercher-personne-input'),
+  rechercherPersonneResultats: document.getElementById('rechercher-personne-resultats'),
+  conversationDetailOverlay: document.getElementById('conversation-detail-overlay'),
+  conversationDetailNom: document.getElementById('conversation-detail-nom'),
+  conversationDetailBack: document.getElementById('conversation-detail-back'),
+  conversationDetailClose: document.getElementById('conversation-detail-close'),
+  conversationMessages: document.getElementById('conversation-messages'),
+  conversationChatForm: document.getElementById('conversation-chat-form'),
+  conversationChatInput: document.getElementById('conversation-chat-input'),
+  conversationPartageBar: document.getElementById('conversation-partage-bar'),
+  conversationPartageNom: document.getElementById('conversation-partage-nom'),
+  conversationPartageToggle: document.getElementById('conversation-partage-toggle')
 };
 
 // ============================================================
@@ -146,6 +166,7 @@ async function router(session) {
 
   data = await loadData();
   await chargerGroupes();
+  await chargerConversations();
   showApp();
   setupRealtime();
 }
@@ -241,6 +262,10 @@ function bindEvents() {
   elements.groupeDetailClose.addEventListener('click', fermerGroupe);
   elements.groupeChatForm.addEventListener('submit', handleEnvoyerMessageGroupe);
   elements.groupeQuitter.addEventListener('click', handleQuitterGroupe);
+  elements.rechercherPersonneForm.addEventListener('submit', handleRechercherPersonne);
+  elements.conversationDetailBack.addEventListener('click', fermerConversation);
+  elements.conversationDetailClose.addEventListener('click', fermerConversation);
+  elements.conversationChatForm.addEventListener('submit', handleEnvoyerMessageConversation);
   document.querySelectorAll('.groupe-tab').forEach(tab => {
     tab.addEventListener('click', () => basculerOngletGroupe(tab.dataset.tab));
   });
@@ -337,8 +362,12 @@ async function handleLogout() {
   authUser = null;
   monProfil = null;
   fermerGroupe();
+  fermerConversation();
   mesGroupes = [];
   groupesDisponibles = [];
+  messagesRecues = [];
+  conversationsAcceptees = [];
+  messagesEnvoyees = [];
   showLogin();
 }
 
@@ -374,6 +403,7 @@ function showApp() {
   renderWeek();
   renderSchedule();
   renderGroupesListes();
+  renderMessagesListes();
   if (monProfil?.role === 'admin') {
     elements.adminBlock.classList.remove('hidden');
     renderDemandes();
@@ -1056,6 +1086,260 @@ function formatStamp(iso) {
   const d = new Date(iso);
   const days = ['Dim', 'Lun', 'Mar', 'Mer', 'Jeu', 'Ven', 'Sam'];
   return `${days[d.getDay()]} ${formatDate(d)} · ${formatTime(iso)}`;
+}
+
+// ============================================================
+// MESSAGES DIRECTS (Phase 2b) — recherche, demandes, conversations 1-à-1
+// Ce qui manque encore (viendra ensuite) : partage du planning dans un DM,
+// rafraîchissement realtime des listes sans rouvrir l'app, bump du cache SW.
+// ============================================================
+
+let messagesRecues = [];         // demandes reçues (l'autre est demandeur), statut='demande'
+let conversationsAcceptees = [];  // statut='acceptee'
+let messagesEnvoyees = [];       // demandes envoyées par moi, statut='demande'
+let conversationOuverte = null;  // { id, autreId, autreNom } de la conversation affichée en détail
+let conversationMessagesCache = [];
+let canalConversationMessages = null;
+
+async function chargerConversations() {
+  const { data: rows, error } = await supabaseClient
+    .from('conversations')
+    .select('id, user_a, user_b, statut, demandeur_id')
+    .or(`user_a.eq.${authUser.id},user_b.eq.${authUser.id}`);
+  if (error) { console.error(error); return; }
+
+  // Les profils de "l'autre personne" sont chargés à part (requête séparée,
+  // comme pour les demandes de groupe) plutôt que par une jointure Supabase :
+  // la table a DEUX clés vers profiles (user_a et user_b), ce qui rend
+  // l'embed implicite ambigu sans connaître le nom exact de la contrainte FK.
+  const autreIds = rows.map(c => (c.user_a === authUser.id ? c.user_b : c.user_a));
+  let profilsParId = {};
+  if (autreIds.length > 0) {
+    const { data: profils, error: errProfils } = await supabaseClient
+      .from('profiles')
+      .select('id, nom, email')
+      .in('id', autreIds);
+    if (errProfils) console.error(errProfils);
+    (profils ?? []).forEach(p => { profilsParId[p.id] = p; });
+  }
+
+  messagesRecues = [];
+  conversationsAcceptees = [];
+  messagesEnvoyees = [];
+
+  rows.forEach(conv => {
+    const autreId = conv.user_a === authUser.id ? conv.user_b : conv.user_a;
+    const autreProfil = profilsParId[autreId];
+    const item = { id: conv.id, autreId, autreNom: autreProfil?.nom || autreProfil?.email || '…' };
+    if (conv.statut === 'acceptee') conversationsAcceptees.push(item);
+    else if (conv.demandeur_id === authUser.id) messagesEnvoyees.push(item);
+    else messagesRecues.push(item);
+  });
+
+  renderMessagesListes();
+}
+
+function renderMessagesListes() {
+  // Demandes reçues : bloc caché s'il n'y en a aucune, comme le panneau admin
+  elements.messagesDemandesBlock.classList.toggle('hidden', messagesRecues.length === 0);
+  elements.messagesDemandesCount.textContent = messagesRecues.length;
+  elements.messagesDemandesCount.classList.toggle('hidden', messagesRecues.length === 0);
+  elements.messagesRecuesListe.innerHTML = '';
+  messagesRecues.forEach(conv => {
+    const item = document.createElement('li');
+    item.className = 'demande-item';
+    const nom = document.createElement('strong');
+    nom.textContent = conv.autreNom;
+    const actions = document.createElement('div');
+    actions.className = 'demande-actions';
+    const accepter = document.createElement('button');
+    accepter.className = 'demande-accepter';
+    accepter.textContent = 'Accepter';
+    accepter.addEventListener('click', () => accepterDemandeMessage(conv.id));
+    const refuser = document.createElement('button');
+    refuser.className = 'demande-refuser';
+    refuser.textContent = 'Refuser';
+    refuser.addEventListener('click', () => refuserDemandeMessage(conv.id));
+    actions.appendChild(accepter);
+    actions.appendChild(refuser);
+    item.appendChild(nom);
+    item.appendChild(actions);
+    elements.messagesRecuesListe.appendChild(item);
+  });
+
+  // Conversations acceptées : cliquables, ouvrent le détail
+  elements.messagesConversationsListe.innerHTML = '';
+  elements.messagesVide.classList.toggle('hidden', conversationsAcceptees.length > 0);
+  conversationsAcceptees.forEach(conv => {
+    const li = document.createElement('li');
+    const carte = document.createElement('button');
+    carte.type = 'button';
+    carte.className = 'groupe-carte';
+    carte.innerHTML = `<span class="groupe-carte-nom"><strong>${escapeHtml(conv.autreNom)}</strong></span>`;
+    carte.addEventListener('click', () => ouvrirConversation(conv.id, conv.autreId, conv.autreNom));
+    li.appendChild(carte);
+    elements.messagesConversationsListe.appendChild(li);
+  });
+
+  // Demandes envoyées, en attente : pas encore cliquables (viendra avec l'état
+  // "en attente d'acceptation" de l'overlay, à la prochaine étape)
+  elements.messagesEnvoyeesListe.innerHTML = '';
+  messagesEnvoyees.forEach(conv => {
+    const li = document.createElement('li');
+    const carte = document.createElement('div');
+    carte.className = 'groupe-carte';
+    carte.style.cursor = 'default';
+    carte.innerHTML = `<span class="groupe-carte-nom"><strong>${escapeHtml(conv.autreNom)}</strong></span>`;
+    const btn = document.createElement('button');
+    btn.className = 'groupe-carte-decouvrir';
+    btn.textContent = 'Demande envoyée';
+    btn.disabled = true;
+    carte.appendChild(btn);
+    li.appendChild(carte);
+    elements.messagesEnvoyeesListe.appendChild(li);
+  });
+}
+
+// --- Recherche d'une personne, pour démarrer une nouvelle demande ---
+
+async function handleRechercherPersonne(event) {
+  event.preventDefault();
+  const query = elements.rechercherPersonneInput.value.trim();
+  if (query.length < 2) { elements.rechercherPersonneResultats.innerHTML = ''; return; }
+
+  const { data: rows, error } = await supabaseClient
+    .from('profiles')
+    .select('id, nom, email')
+    .ilike('nom', `%${query}%`)
+    .neq('id', authUser.id)
+    .limit(10);
+  if (error) { console.error(error); return; }
+
+  // On exclut les personnes avec qui j'ai déjà une ligne (acceptée, reçue ou
+  // envoyée) : pas la peine de proposer une nouvelle demande dans ces cas.
+  const idsConnus = new Set([
+    ...conversationsAcceptees.map(c => c.autreId),
+    ...messagesEnvoyees.map(c => c.autreId),
+    ...messagesRecues.map(c => c.autreId)
+  ]);
+
+  elements.rechercherPersonneResultats.innerHTML = '';
+  rows.filter(p => !idsConnus.has(p.id)).forEach(p => {
+    const li = document.createElement('li');
+    const carte = document.createElement('div');
+    carte.className = 'groupe-carte';
+    carte.style.cursor = 'default';
+    carte.innerHTML = `<span class="groupe-carte-nom"><strong>${escapeHtml(p.nom || p.email)}</strong></span>`;
+    const btn = document.createElement('button');
+    btn.className = 'groupe-carte-decouvrir';
+    btn.textContent = 'Envoyer une demande';
+    btn.addEventListener('click', () => envoyerDemandeMessage(p.id));
+    carte.appendChild(btn);
+    li.appendChild(carte);
+    elements.rechercherPersonneResultats.appendChild(li);
+  });
+}
+
+async function envoyerDemandeMessage(autreId) {
+  // user_a/user_b toujours triés dans le même ordre (peu importe qui envoie)
+  // pour n'avoir jamais qu'une seule conversation possible par paire.
+  const [user_a, user_b] = [authUser.id, autreId].sort();
+  const { error } = await supabaseClient
+    .from('conversations')
+    .insert({ user_a, user_b, statut: 'demande', demandeur_id: authUser.id });
+  if (error) { console.error(error); alert("La demande n'a pas pu être envoyée. Réessaie."); return; }
+  elements.rechercherPersonneInput.value = '';
+  elements.rechercherPersonneResultats.innerHTML = '';
+  await chargerConversations();
+}
+
+async function accepterDemandeMessage(conversationId) {
+  const { error } = await supabaseClient
+    .from('conversations')
+    .update({ statut: 'acceptee' })
+    .eq('id', conversationId);
+  if (error) console.error(error);
+  await chargerConversations();
+}
+
+async function refuserDemandeMessage(conversationId) {
+  const { error } = await supabaseClient
+    .from('conversations')
+    .delete()
+    .eq('id', conversationId);
+  if (error) console.error(error);
+  await chargerConversations();
+}
+
+// --- Détail d'une conversation (chat 1-à-1, façon groupe mais sans planning) ---
+
+async function ouvrirConversation(conversationId, autreId, autreNom) {
+  conversationOuverte = { id: conversationId, autreId, autreNom };
+  elements.conversationDetailNom.textContent = autreNom;
+  elements.conversationDetailOverlay.classList.remove('hidden');
+  await chargerMessagesConversation(conversationId);
+  ecouterConversation(conversationId);
+}
+
+function fermerConversation() {
+  conversationOuverte = null;
+  elements.conversationDetailOverlay.classList.add('hidden');
+  if (canalConversationMessages) { supabaseClient.removeChannel(canalConversationMessages); canalConversationMessages = null; }
+}
+
+function ecouterConversation(conversationId) {
+  if (canalConversationMessages) supabaseClient.removeChannel(canalConversationMessages);
+  canalConversationMessages = supabaseClient
+    .channel(`conversation-messages-${conversationId}`)
+    .on('postgres_changes',
+      { event: 'INSERT', schema: 'public', table: 'conversation_messages', filter: `conversation_id=eq.${conversationId}` },
+      async () => { await chargerMessagesConversation(conversationId); })
+    .subscribe();
+}
+
+async function chargerMessagesConversation(conversationId) {
+  const { data: rows, error } = await supabaseClient
+    .from('conversation_messages')
+    .select('id, user_id, message, created_at')
+    .eq('conversation_id', conversationId)
+    .order('created_at', { ascending: true })
+    .limit(200);
+  if (error) { console.error(error); return; }
+  conversationMessagesCache = rows;
+  renderMessagesConversation();
+}
+
+async function handleEnvoyerMessageConversation(event) {
+  event.preventDefault();
+  if (!conversationOuverte) return;
+  const texte = elements.conversationChatInput.value.trim();
+  if (!texte) return;
+  elements.conversationChatInput.value = '';
+  const { error } = await supabaseClient
+    .from('conversation_messages')
+    .insert({ conversation_id: conversationOuverte.id, user_id: authUser.id, message: texte });
+  if (error) console.error(error);
+}
+
+function renderMessagesConversation() {
+  // Pas de nom d'auteur sur chaque bulle (contrairement au chat de groupe) :
+  // en 1-à-1, "moi" à droite / "l'autre" à gauche suffit à s'y retrouver.
+  elements.conversationMessages.innerHTML = '';
+  conversationMessagesCache.forEach(m => {
+    const estMoi = m.user_id === authUser.id;
+    const bulle = document.createElement('div');
+    bulle.className = `wa-bulle ${estMoi ? 'wa-bulle-moi' : 'wa-bulle-autre'}`;
+    const texte = document.createElement('p');
+    texte.className = 'wa-texte';
+    texte.textContent = m.message;
+    const heure = document.createElement('span');
+    heure.className = 'wa-heure';
+    heure.textContent = formatTime(m.created_at);
+    bulle.appendChild(texte);
+    bulle.appendChild(heure);
+    elements.conversationMessages.appendChild(bulle);
+  });
+  elements.conversationMessages.scrollTop = elements.conversationMessages.scrollHeight;
 }
 
 // ============================================================

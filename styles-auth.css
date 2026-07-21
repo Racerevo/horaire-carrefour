@@ -413,3 +413,34 @@
 @media (max-width: 860px) {
   .workspace.view-groupes .schedule-panel { display: none; }
 }
+
+/* ============ Messages directs (Phase 2b) ============ */
+/* Grid-row explicites : la barre de partage est parfois cachée (hidden =
+   display:none, retirée du flow), donc sans ça l'auto-placement décalerait
+   les messages/le formulaire dans les mauvaises rangées du grid hérité de
+   .groupe-detail-box (contrairement au chat de groupe, où un des deux
+   onglets est TOUJOURS affiché — jamais 3 enfants visibles sur 4 rangées). */
+#conversation-detail-overlay .import-header { grid-row: 1; }
+#conversation-detail-overlay .conversation-partage-bar { grid-row: 2; }
+#conversation-detail-overlay .chat-messages { grid-row: 3; }
+#conversation-detail-overlay .chat-form { grid-row: 4; }
+
+.conversation-partage-bar {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 10px;
+  padding: 10px 14px;
+  border-radius: 16px;
+  background: rgba(37, 99, 235, 0.08);
+  border: 1px solid rgba(37, 99, 235, 0.3);
+  font-size: 0.88rem;
+}
+.conversation-partage-bar.actif {
+  background: rgba(22, 163, 74, 0.1);
+  border-color: rgba(22, 163, 74, 0.35);
+}
+.conversation-partage-bar.actif #conversation-partage-toggle {
+  background: #16a34a;
+  color: white;
+}

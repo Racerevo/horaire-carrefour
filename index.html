@@ -113,6 +113,27 @@
             <button type="submit" class="button secondary">+ Créer un groupe</button>
           </form>
 
+          <!-- Demandes de message reçues (masqué si aucune) -->
+          <div id="messages-demandes-block" class="hidden">
+            <div class="panel-title">
+              Demandes de message <span id="messages-demandes-count" class="admin-badge hidden">0</span>
+            </div>
+            <ul id="messages-recues-liste" class="user-list"></ul>
+          </div>
+
+          <div class="panel-title">Messages</div>
+          <ul id="messages-conversations-liste" class="user-list groupes-liste"></ul>
+          <p id="messages-vide" class="groupes-vide hidden">
+            Aucune conversation pour l'instant. Cherche une personne ci-dessous pour démarrer un échange.
+          </p>
+          <ul id="messages-envoyees-liste" class="user-list groupes-liste"></ul>
+
+          <form id="rechercher-personne-form" class="creer-groupe-form">
+            <input type="text" id="rechercher-personne-input" placeholder="Chercher une personne par son nom…" autocomplete="off" />
+            <button type="submit" class="button secondary">🔍 Chercher</button>
+          </form>
+          <ul id="rechercher-personne-resultats" class="user-list groupes-liste"></ul>
+
           <button id="enable-push" class="button secondary hidden">🔔 Activer les notifications</button>
         </aside>
 
@@ -172,6 +193,29 @@
       </div>
 
       <button id="groupe-quitter" class="button secondary groupe-quitter">Quitter le groupe</button>
+    </div>
+  </div>
+
+  <!-- ======== DÉTAIL D'UNE CONVERSATION (message direct 1-à-1) ======== -->
+  <div id="conversation-detail-overlay" class="import-overlay hidden">
+    <div class="import-box groupe-detail-box">
+      <div class="import-header">
+        <button id="conversation-detail-back" class="import-lien">‹ Messages</button>
+        <h3 id="conversation-detail-nom">Conversation</h3>
+        <button id="conversation-detail-close" class="icon-button" aria-label="Fermer">✕</button>
+      </div>
+
+      <div id="conversation-partage-bar" class="conversation-partage-bar hidden">
+        <span>Partager mon planning avec <strong id="conversation-partage-nom"></strong></span>
+        <button id="conversation-partage-toggle" class="button secondary" type="button">Activer</button>
+      </div>
+
+      <div id="conversation-messages" class="chat-messages groupe-chat-messages"></div>
+
+      <form id="conversation-chat-form" class="chat-form">
+        <input id="conversation-chat-input" type="text" placeholder="Écrire un message..." autocomplete="off" required />
+        <button type="submit" class="button primary">Envoyer</button>
+      </form>
     </div>
   </div>
 
