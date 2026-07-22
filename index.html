@@ -99,40 +99,44 @@
             <ul id="admin-demandes" class="user-list"></ul>
           </div>
 
-          <div class="panel-title">Mes groupes</div>
-          <ul id="mes-groupes-liste" class="user-list groupes-liste"></ul>
-          <p id="mes-groupes-vide" class="groupes-vide hidden">
-            Rejoins un groupe ci-dessous, ou envoie une demande de message pour démarrer un chat.
-          </p>
+          <div class="sidebar-groupes">
+            <div class="panel-title">Mes groupes</div>
+            <ul id="mes-groupes-liste" class="user-list groupes-liste"></ul>
+            <p id="mes-groupes-vide" class="groupes-vide hidden">
+              Rejoins un groupe ci-dessous, ou envoie une demande de message pour démarrer un chat.
+            </p>
 
-          <div class="panel-title">Découvrir des groupes</div>
-          <ul id="groupes-disponibles-liste" class="user-list groupes-liste"></ul>
+            <div class="panel-title">Découvrir des groupes</div>
+            <ul id="groupes-disponibles-liste" class="user-list groupes-liste"></ul>
 
-          <form id="creer-groupe-form" class="creer-groupe-form">
-            <input type="text" id="creer-groupe-nom" placeholder='Nom du groupe (ex : "Caisses matin")' />
-            <button type="submit" class="button secondary">+ Créer un groupe</button>
-          </form>
-
-          <!-- Demandes de message reçues (masqué si aucune) -->
-          <div id="messages-demandes-block" class="hidden">
-            <div class="panel-title">
-              Demandes de message <span id="messages-demandes-count" class="admin-badge hidden">0</span>
-            </div>
-            <ul id="messages-recues-liste" class="user-list"></ul>
+            <form id="creer-groupe-form" class="creer-groupe-form">
+              <input type="text" id="creer-groupe-nom" placeholder='Nom du groupe (ex : "Caisses matin")' />
+              <button type="submit" class="button secondary">+ Créer un groupe</button>
+            </form>
           </div>
 
-          <div class="panel-title">Messages</div>
-          <ul id="messages-conversations-liste" class="user-list groupes-liste"></ul>
-          <p id="messages-vide" class="groupes-vide hidden">
-            Aucune conversation pour l'instant. Cherche une personne ci-dessous pour démarrer un échange.
-          </p>
-          <ul id="messages-envoyees-liste" class="user-list groupes-liste"></ul>
+          <div class="sidebar-messages">
+            <!-- Demandes de message reçues (masqué si aucune) -->
+            <div id="messages-demandes-block" class="hidden">
+              <div class="panel-title">
+                Demandes de message <span id="messages-demandes-count" class="admin-badge hidden">0</span>
+              </div>
+              <ul id="messages-recues-liste" class="user-list"></ul>
+            </div>
 
-          <form id="rechercher-personne-form" class="creer-groupe-form">
-            <input type="text" id="rechercher-personne-input" placeholder="Chercher une personne par son nom…" autocomplete="off" />
-            <button type="submit" class="button secondary">🔍 Chercher</button>
-          </form>
-          <ul id="rechercher-personne-resultats" class="user-list groupes-liste"></ul>
+            <div class="panel-title">Messages</div>
+            <ul id="messages-conversations-liste" class="user-list groupes-liste"></ul>
+            <p id="messages-vide" class="groupes-vide hidden">
+              Aucune conversation pour l'instant. Cherche une personne ci-dessous pour démarrer un échange.
+            </p>
+            <ul id="messages-envoyees-liste" class="user-list groupes-liste"></ul>
+
+            <form id="rechercher-personne-form" class="creer-groupe-form">
+              <input type="text" id="rechercher-personne-input" placeholder="Chercher une personne par son nom…" autocomplete="off" />
+              <button type="submit" class="button secondary">🔍 Chercher</button>
+            </form>
+            <ul id="rechercher-personne-resultats" class="user-list groupes-liste"></ul>
+          </div>
 
           <button id="enable-push" class="button secondary hidden">🔔 Activer les notifications</button>
         </aside>
@@ -159,6 +163,7 @@
       </div>
       <nav class="mobile-tabs">
         <button data-view="planning" class="tab active">📅<span>Planning</span></button>
+        <button data-view="messages" class="tab">💬<span>Messages</span></button>
         <button data-view="groupes" class="tab">👥<span>Groupes</span></button>
       </nav>
     </section>

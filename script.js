@@ -266,6 +266,7 @@ function bindEvents() {
   elements.conversationDetailBack.addEventListener('click', fermerConversation);
   elements.conversationDetailClose.addEventListener('click', fermerConversation);
   elements.conversationChatForm.addEventListener('submit', handleEnvoyerMessageConversation);
+  elements.conversationPartageToggle.addEventListener('click', togglerPartage);
   document.querySelectorAll('.groupe-tab').forEach(tab => {
     tab.addEventListener('click', () => basculerOngletGroupe(tab.dataset.tab));
   });
@@ -273,7 +274,7 @@ function bindEvents() {
     tab.addEventListener('click', () => {
       const view = tab.dataset.view;
       const workspace = document.getElementById('workspace');
-      workspace.classList.remove('view-planning', 'view-groupes');
+      workspace.classList.remove('view-planning', 'view-groupes', 'view-messages');
       workspace.classList.add(`view-${view}`);
       document.querySelectorAll('.mobile-tabs .tab').forEach(t => t.classList.remove('active'));
       tab.classList.add('active');
@@ -1090,8 +1091,8 @@ function formatStamp(iso) {
 
 // ============================================================
 // MESSAGES DIRECTS (Phase 2b) — recherche, demandes, conversations 1-à-1
-// Ce qui manque encore (viendra ensuite) : partage du planning dans un DM,
-// rafraîchissement realtime des listes sans rouvrir l'app, bump du cache SW.
+// Ce qui manque encore (viendra ensuite) : rafraîchissement realtime des
+// listes sans rouvrir l'app, bump du cache SW.
 // ============================================================
 
 let messagesRecues = [];         // demandes reçues (l'autre est demandeur), statut='demande'
@@ -1274,17 +1275,64 @@ async function refuserDemandeMessage(conversationId) {
 // --- Détail d'une conversation (chat 1-à-1, façon groupe mais sans planning) ---
 
 async function ouvrirConversation(conversationId, autreId, autreNom) {
-  conversationOuverte = { id: conversationId, autreId, autreNom };
+  conversationOuverte = { id: conversationId, autreId, autreNom, partageActif: false };
   elements.conversationDetailNom.textContent = autreNom;
   elements.conversationDetailOverlay.classList.remove('hidden');
   await chargerMessagesConversation(conversationId);
+  await chargerPartage(conversationId);
   ecouterConversation(conversationId);
 }
 
 function fermerConversation() {
   conversationOuverte = null;
   elements.conversationDetailOverlay.classList.add('hidden');
+  elements.conversationPartageBar.classList.add('hidden');
   if (canalConversationMessages) { supabaseClient.removeChannel(canalConversationMessages); canalConversationMessages = null; }
+}
+
+// --- Partage du planning dans un DM (optionnel, pas automatique comme dans
+// un groupe) : une ligne par personne dans conversation_partage, chacun ne
+// peut écrire que la sienne — je ne lis donc jamais que MA ligne ici, jamais
+// celle de l'autre (ça, c'est le rôle de partage_via_dm_avec côté SQL).
+
+async function chargerPartage(conversationId) {
+  const { data: row, error } = await supabaseClient
+    .from('conversation_partage')
+    .select('partage')
+    .eq('conversation_id', conversationId)
+    .eq('user_id', authUser.id)
+    .maybeSingle();
+  if (error) { console.error(error); return; }
+  if (conversationOuverte) conversationOuverte.partageActif = row?.partage ?? false;
+  renderPartageBar();
+}
+
+function renderPartageBar() {
+  if (!conversationOuverte) return;
+  const actif = !!conversationOuverte.partageActif;
+  elements.conversationPartageBar.classList.remove('hidden');
+  elements.conversationPartageBar.classList.toggle('actif', actif);
+  elements.conversationPartageNom.textContent = conversationOuverte.autreNom;
+  elements.conversationPartageToggle.textContent = actif ? 'Désactiver' : 'Activer';
+}
+
+async function togglerPartage() {
+  if (!conversationOuverte) return;
+  const nouvelEtat = !conversationOuverte.partageActif;
+  conversationOuverte.partageActif = nouvelEtat; // mise à jour optimiste
+  renderPartageBar();
+  const { error } = await supabaseClient
+    .from('conversation_partage')
+    .upsert(
+      { conversation_id: conversationOuverte.id, user_id: authUser.id, partage: nouvelEtat },
+      { onConflict: 'conversation_id,user_id' }
+    );
+  if (error) {
+    console.error(error);
+    conversationOuverte.partageActif = !nouvelEtat; // annulé, l'écriture a échoué
+    renderPartageBar();
+    alert("Le changement n'a pas pu être enregistré. Réessaie.");
+  }
 }
 
 function ecouterConversation(conversationId) {

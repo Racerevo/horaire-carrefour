@@ -408,10 +408,16 @@
   .groupe-detail-box { height: 100dvh; border-radius: 0; }
 }
 
-/* Mobile : sur l'onglet Groupes, on cache le planning perso (view-shared/
-   view-employees existaient avant, remplacés par le seul onglet view-groupes) */
+/* Mobile : chaque onglet du bas n'affiche qu'un bloc du workspace.
+   view-planning cache toute la sidebar (règle posée dans styles.css).
+   view-groupes / view-messages partagent la même sidebar mais cachent
+   chacun la partie qui ne le concerne pas (.sidebar-groupes /
+   .sidebar-messages), et cachent tous les deux le planning perso. */
 @media (max-width: 860px) {
-  .workspace.view-groupes .schedule-panel { display: none; }
+  .workspace.view-groupes .schedule-panel,
+  .workspace.view-messages .schedule-panel { display: none; }
+  .workspace.view-groupes .sidebar-messages { display: none; }
+  .workspace.view-messages .sidebar-groupes { display: none; }
 }
 
 /* ============ Messages directs (Phase 2b) ============ */
