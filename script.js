@@ -222,6 +222,13 @@ function setupRealtime() {
     })
     .subscribe();
 
+  // Demandes de message envoyées/reçues/acceptées/refusées → rafraîchit
+  // les 3 listes de la section Messages sans attendre une action locale
+  supabaseClient
+    .channel('conversations-changes')
+    .on('postgres_changes', { event: '*', schema: 'public', table: 'conversations' }, () => authUser && chargerConversations())
+    .subscribe();
+
   // Nouveaux profils (demandes de compte) + validations → badge admin
   supabaseClient
     .channel('profiles-changes')
@@ -1091,8 +1098,6 @@ function formatStamp(iso) {
 
 // ============================================================
 // MESSAGES DIRECTS (Phase 2b) — recherche, demandes, conversations 1-à-1
-// Ce qui manque encore (viendra ensuite) : rafraîchissement realtime des
-// listes sans rouvrir l'app, bump du cache SW.
 // ============================================================
 
 let messagesRecues = [];         // demandes reçues (l'autre est demandeur), statut='demande'
