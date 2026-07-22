@@ -274,11 +274,13 @@ function bindEvents() {
   });
   elements.creerGroupeForm.addEventListener('submit', handleCreerGroupe);
   elements.inviterGroupeForm.addEventListener('submit', handleInviterGroupe);
+  elements.inviterGroupeInput.addEventListener('input', planifierRechercheInvitation);
   elements.groupeDetailBack.addEventListener('click', fermerGroupe);
   elements.groupeDetailClose.addEventListener('click', fermerGroupe);
   elements.groupeChatForm.addEventListener('submit', handleEnvoyerMessageGroupe);
   elements.groupeQuitter.addEventListener('click', handleQuitterGroupe);
   elements.rechercherPersonneForm.addEventListener('submit', handleRechercherPersonne);
+  elements.rechercherPersonneInput.addEventListener('input', planifierRecherchePersonne);
   elements.conversationDetailBack.addEventListener('click', fermerConversation);
   elements.conversationDetailClose.addEventListener('click', fermerConversation);
   elements.conversationChatForm.addEventListener('submit', handleEnvoyerMessageConversation);
@@ -380,6 +382,7 @@ async function handleLogout() {
   monProfil = null;
   fermerGroupe();
   fermerConversation();
+  clearTimeout(rechercherPersonneTimeout);
   mesGroupes = [];
   groupesDisponibles = [];
   invitationsGroupeRecues = [];
@@ -944,6 +947,7 @@ async function ouvrirGroupe(groupeId, nom) {
 function fermerGroupe() {
   groupeOuvert = null;
   elements.groupeDetailOverlay.classList.add('hidden');
+  clearTimeout(inviterGroupeTimeout);
   elements.inviterGroupeInput.value = '';
   elements.inviterGroupeResultats.innerHTML = '';
   elements.inviterGroupeResultats.classList.add('hidden');
@@ -1063,8 +1067,22 @@ async function refuserDemande(userId) {
 
 // --- Inviter quelqu'un directement dans le groupe ouvert ---
 
+let inviterGroupeTimeout = null;
+
 async function handleInviterGroupe(event) {
   event.preventDefault();
+  clearTimeout(inviterGroupeTimeout);
+  await executerRechercheInvitation();
+}
+
+// Suggestions en direct pendant la frappe, avec un petit délai pour éviter
+// une requête Supabase à chaque lettre tapée
+function planifierRechercheInvitation() {
+  clearTimeout(inviterGroupeTimeout);
+  inviterGroupeTimeout = setTimeout(executerRechercheInvitation, 300);
+}
+
+async function executerRechercheInvitation() {
   if (!groupeOuvert) return;
   const query = elements.inviterGroupeInput.value.trim();
   if (query.length < 2) {
@@ -1359,8 +1377,22 @@ function renderMessagesListes() {
 
 // --- Recherche d'une personne, pour démarrer une nouvelle demande ---
 
+let rechercherPersonneTimeout = null;
+
 async function handleRechercherPersonne(event) {
   event.preventDefault();
+  clearTimeout(rechercherPersonneTimeout);
+  await executerRecherchePersonne();
+}
+
+// Suggestions en direct pendant la frappe, avec un petit délai pour éviter
+// une requête Supabase à chaque lettre tapée
+function planifierRecherchePersonne() {
+  clearTimeout(rechercherPersonneTimeout);
+  rechercherPersonneTimeout = setTimeout(executerRecherchePersonne, 300);
+}
+
+async function executerRecherchePersonne() {
   const query = elements.rechercherPersonneInput.value.trim();
   if (query.length < 2) { elements.rechercherPersonneResultats.innerHTML = ''; return; }
 
