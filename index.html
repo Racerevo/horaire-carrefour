@@ -100,6 +100,14 @@
           </div>
 
           <div class="sidebar-groupes">
+            <!-- Invitations reçues (masqué si aucune) -->
+            <div id="invitations-groupe-block" class="hidden">
+              <div class="panel-title">
+                Invitations reçues <span id="invitations-groupe-count" class="admin-badge hidden">0</span>
+              </div>
+              <ul id="invitations-groupe-liste" class="user-list"></ul>
+            </div>
+
             <div class="panel-title">Mes groupes</div>
             <ul id="mes-groupes-liste" class="user-list groupes-liste"></ul>
             <p id="mes-groupes-vide" class="groupes-vide hidden">
@@ -185,6 +193,12 @@
 
       <div id="groupe-tab-chat" class="groupe-tab-panel">
         <div id="groupe-demandes" class="groupe-demandes hidden"></div>
+
+        <form id="inviter-groupe-form" class="creer-groupe-form">
+          <input type="text" id="inviter-groupe-input" placeholder="Inviter quelqu'un par son nom…" autocomplete="off" />
+          <button type="submit" class="button secondary">Inviter</button>
+        </form>
+        <div id="inviter-groupe-resultats" class="groupe-demandes hidden"></div>
         <div id="groupe-messages" class="chat-messages groupe-chat-messages"></div>
         <form id="groupe-chat-form" class="chat-form">
           <input id="groupe-chat-input" type="text" placeholder="Écrire un message..." autocomplete="off" required />

@@ -33,7 +33,9 @@ let groupesDisponibles = [];  // groupes où je ne suis pas encore (avec statut 
 let groupeOuvert = null;      // { id, nom } du groupe actuellement affiché en détail
 let groupeOngletActif = 'chat'; // 'chat' | 'planning'
 let groupeMembresCache = [];   // profils des membres du groupe ouvert
-let groupeDemandesCache = [];  // profils en attente de validation dans ce groupe
+let groupeDemandesCache = [];  // profils en attente de validation (demande spontanée) dans ce groupe
+let groupeIdsOccupesCache = new Set(); // tous les user_id ayant déjà une ligne (membre/demande/invité) dans ce groupe — pour exclure de la recherche d'invitation
+let invitationsGroupeRecues = []; // groupes où JE suis invité, en attente de ma réponse : { id, nom }
 let groupeMessagesCache = [];  // messages du groupe ouvert
 let canalGroupeMessages = null;
 let canalGroupeMembres = null;
@@ -88,6 +90,9 @@ const elements = {
   importValider: document.getElementById('import-valider'),
   importRetry: document.getElementById('import-retry'),
   // Groupes
+  invitationsGroupeBlock: document.getElementById('invitations-groupe-block'),
+  invitationsGroupeCount: document.getElementById('invitations-groupe-count'),
+  invitationsGroupeListe: document.getElementById('invitations-groupe-liste'),
   mesGroupesListe: document.getElementById('mes-groupes-liste'),
   mesGroupesVide: document.getElementById('mes-groupes-vide'),
   groupesDisponiblesListe: document.getElementById('groupes-disponibles-liste'),
@@ -100,6 +105,9 @@ const elements = {
   groupeTabChat: document.getElementById('groupe-tab-chat'),
   groupeTabPlanning: document.getElementById('groupe-tab-planning'),
   groupeDemandes: document.getElementById('groupe-demandes'),
+  inviterGroupeForm: document.getElementById('inviter-groupe-form'),
+  inviterGroupeInput: document.getElementById('inviter-groupe-input'),
+  inviterGroupeResultats: document.getElementById('inviter-groupe-resultats'),
   groupeMessages: document.getElementById('groupe-messages'),
   groupeChatForm: document.getElementById('groupe-chat-form'),
   groupeChatInput: document.getElementById('groupe-chat-input'),
@@ -265,6 +273,7 @@ function bindEvents() {
     renderSchedule();
   });
   elements.creerGroupeForm.addEventListener('submit', handleCreerGroupe);
+  elements.inviterGroupeForm.addEventListener('submit', handleInviterGroupe);
   elements.groupeDetailBack.addEventListener('click', fermerGroupe);
   elements.groupeDetailClose.addEventListener('click', fermerGroupe);
   elements.groupeChatForm.addEventListener('submit', handleEnvoyerMessageGroupe);
@@ -373,6 +382,7 @@ async function handleLogout() {
   fermerConversation();
   mesGroupes = [];
   groupesDisponibles = [];
+  invitationsGroupeRecues = [];
   messagesRecues = [];
   conversationsAcceptees = [];
   messagesEnvoyees = [];
@@ -747,15 +757,21 @@ async function deleteEvent(eventId) {
 // ============================================================
 
 async function chargerGroupes() {
-  // Toutes les lignes groupe_membres où JE figure (mes 'membre' + mes 'demande')
+  // Toutes les lignes groupe_membres où JE figure (mes 'membre', mes demandes
+  // spontanées, et les invitations reçues qui m'attendent)
   const { data: mesLignes, error: err1 } = await supabaseClient
     .from('groupe_membres')
-    .select('groupe_id, statut')
+    .select('groupe_id, statut, invite_par')
     .eq('user_id', authUser.id);
   if (err1) { console.error(err1); return; }
 
   const idsMembre = mesLignes.filter(l => l.statut === 'membre').map(l => l.groupe_id);
-  const idsDemandeEnCours = new Set(mesLignes.filter(l => l.statut === 'demande').map(l => l.groupe_id));
+  const idsDemandeEnCours = new Set(
+    mesLignes.filter(l => l.statut === 'demande' && !l.invite_par).map(l => l.groupe_id)
+  );
+  const idsInvitationRecue = mesLignes
+    .filter(l => l.statut === 'demande' && l.invite_par)
+    .map(l => l.groupe_id);
 
   // Tous les groupes (annuaire) — pour la liste "Découvrir"
   const { data: tousLesGroupes, error: err2 } = await supabaseClient
@@ -764,13 +780,16 @@ async function chargerGroupes() {
     .order('nom');
   if (err2) { console.error(err2); return; }
 
-  // Nombre de demandes en attente, pour CHAQUE groupe où je suis membre
+  // Nombre de demandes SPONTANÉES en attente, pour CHAQUE groupe où je suis
+  // membre (les invitations envoyées par un membre ne comptent pas ici :
+  // c'est à la personne invitée de répondre, pas aux autres membres)
   let demandesParGroupe = {};
   if (idsMembre.length > 0) {
     const { data: demandesRows } = await supabaseClient
       .from('groupe_membres')
       .select('groupe_id')
       .eq('statut', 'demande')
+      .is('invite_par', null)
       .in('groupe_id', idsMembre);
     (demandesRows ?? []).forEach(r => {
       demandesParGroupe[r.groupe_id] = (demandesParGroupe[r.groupe_id] || 0) + 1;
@@ -782,13 +801,43 @@ async function chargerGroupes() {
     .map(g => ({ id: g.id, nom: g.nom, nbDemandes: demandesParGroupe[g.id] || 0 }));
 
   groupesDisponibles = tousLesGroupes
-    .filter(g => !idsMembre.includes(g.id))
+    .filter(g => !idsMembre.includes(g.id) && !idsInvitationRecue.includes(g.id))
     .map(g => ({ id: g.id, nom: g.nom, demandeEnCours: idsDemandeEnCours.has(g.id) }));
+
+  invitationsGroupeRecues = tousLesGroupes
+    .filter(g => idsInvitationRecue.includes(g.id))
+    .map(g => ({ id: g.id, nom: g.nom }));
 
   renderGroupesListes();
 }
 
 function renderGroupesListes() {
+  elements.invitationsGroupeBlock.classList.toggle('hidden', invitationsGroupeRecues.length === 0);
+  elements.invitationsGroupeCount.textContent = invitationsGroupeRecues.length;
+  elements.invitationsGroupeCount.classList.toggle('hidden', invitationsGroupeRecues.length === 0);
+  elements.invitationsGroupeListe.innerHTML = '';
+  invitationsGroupeRecues.forEach(inv => {
+    const item = document.createElement('li');
+    item.className = 'demande-item';
+    const nom = document.createElement('strong');
+    nom.textContent = inv.nom;
+    const actions = document.createElement('div');
+    actions.className = 'demande-actions';
+    const accepter = document.createElement('button');
+    accepter.className = 'demande-accepter';
+    accepter.textContent = 'Accepter';
+    accepter.addEventListener('click', () => accepterInvitationGroupe(inv.id));
+    const refuser = document.createElement('button');
+    refuser.className = 'demande-refuser';
+    refuser.textContent = 'Refuser';
+    refuser.addEventListener('click', () => refuserInvitationGroupe(inv.id));
+    actions.appendChild(accepter);
+    actions.appendChild(refuser);
+    item.appendChild(nom);
+    item.appendChild(actions);
+    elements.invitationsGroupeListe.appendChild(item);
+  });
+
   elements.mesGroupesListe.innerHTML = '';
   elements.mesGroupesVide.classList.toggle('hidden', mesGroupes.length > 0);
   mesGroupes.forEach(g => {
@@ -859,6 +908,26 @@ async function demanderRejoindre(groupeId) {
   await chargerGroupes();
 }
 
+async function accepterInvitationGroupe(groupeId) {
+  const { error } = await supabaseClient
+    .from('groupe_membres')
+    .update({ statut: 'membre' })
+    .eq('groupe_id', groupeId)
+    .eq('user_id', authUser.id);
+  if (error) console.error(error);
+  await chargerGroupes();
+}
+
+async function refuserInvitationGroupe(groupeId) {
+  const { error } = await supabaseClient
+    .from('groupe_membres')
+    .delete()
+    .eq('groupe_id', groupeId)
+    .eq('user_id', authUser.id);
+  if (error) console.error(error);
+  await chargerGroupes();
+}
+
 // --- Détail d'un groupe (chat + planning) ---
 
 async function ouvrirGroupe(groupeId, nom) {
@@ -875,6 +944,9 @@ async function ouvrirGroupe(groupeId, nom) {
 function fermerGroupe() {
   groupeOuvert = null;
   elements.groupeDetailOverlay.classList.add('hidden');
+  elements.inviterGroupeInput.value = '';
+  elements.inviterGroupeResultats.innerHTML = '';
+  elements.inviterGroupeResultats.classList.add('hidden');
   if (canalGroupeMessages) { supabaseClient.removeChannel(canalGroupeMessages); canalGroupeMessages = null; }
   if (canalGroupeMembres) { supabaseClient.removeChannel(canalGroupeMembres); canalGroupeMembres = null; }
 }
@@ -909,13 +981,39 @@ function ecouterGroupe(groupeId) {
 }
 
 async function chargerMembresGroupe(groupeId) {
+  // Requête séparée pour les profils plutôt qu'une jointure implicite :
+  // groupe_membres a maintenant DEUX clés vers profiles (user_id, invite_par),
+  // ce qui rend l'embed ambigu — même raison que pour les conversations.
   const { data: lignes, error } = await supabaseClient
     .from('groupe_membres')
-    .select('user_id, statut, profil:profiles(id, nom, email)')
+    .select('user_id, statut, invite_par')
     .eq('groupe_id', groupeId);
   if (error) { console.error(error); return; }
-  groupeMembresCache = lignes.filter(l => l.statut === 'membre').map(l => l.profil).filter(Boolean);
-  groupeDemandesCache = lignes.filter(l => l.statut === 'demande').map(l => l.profil).filter(Boolean);
+
+  const ids = lignes.map(l => l.user_id);
+  let profilsParId = {};
+  if (ids.length > 0) {
+    const { data: profils, error: errProfils } = await supabaseClient
+      .from('profiles')
+      .select('id, nom, email')
+      .in('id', ids);
+    if (errProfils) console.error(errProfils);
+    (profils ?? []).forEach(p => { profilsParId[p.id] = p; });
+  }
+
+  groupeMembresCache = lignes
+    .filter(l => l.statut === 'membre')
+    .map(l => profilsParId[l.user_id])
+    .filter(Boolean);
+  // Seulement les demandes SPONTANÉES ici : une invitation en attente ne se
+  // valide que par la personne invitée elle-même (voir accepterInvitationGroupe),
+  // pas par les autres membres — donc pas de bouton Accepter/Refuser pour ça ici.
+  groupeDemandesCache = lignes
+    .filter(l => l.statut === 'demande' && !l.invite_par)
+    .map(l => profilsParId[l.user_id])
+    .filter(Boolean);
+  groupeIdsOccupesCache = new Set(lignes.map(l => l.user_id));
+
   renderDemandesGroupe();
 }
 
@@ -961,6 +1059,59 @@ async function refuserDemande(userId) {
     .eq('groupe_id', groupeOuvert.id)
     .eq('user_id', userId);
   if (error) console.error(error);
+}
+
+// --- Inviter quelqu'un directement dans le groupe ouvert ---
+
+async function handleInviterGroupe(event) {
+  event.preventDefault();
+  if (!groupeOuvert) return;
+  const query = elements.inviterGroupeInput.value.trim();
+  if (query.length < 2) {
+    elements.inviterGroupeResultats.innerHTML = '';
+    elements.inviterGroupeResultats.classList.add('hidden');
+    return;
+  }
+
+  const { data: rows, error } = await supabaseClient
+    .from('profiles')
+    .select('id, nom, email')
+    .ilike('nom', `%${query}%`)
+    .neq('id', authUser.id)
+    .limit(10);
+  if (error) { console.error(error); return; }
+
+  const resultats = rows.filter(p => !groupeIdsOccupesCache.has(p.id));
+  elements.inviterGroupeResultats.innerHTML = '';
+  elements.inviterGroupeResultats.classList.toggle('hidden', resultats.length === 0);
+  resultats.forEach(p => {
+    const item = document.createElement('div');
+    item.className = 'groupe-demande-item';
+    const nom = document.createElement('span');
+    nom.textContent = p.nom || p.email;
+    const actions = document.createElement('div');
+    actions.className = 'demande-actions';
+    const btn = document.createElement('button');
+    btn.className = 'demande-accepter';
+    btn.textContent = 'Inviter';
+    btn.addEventListener('click', () => inviterDansGroupe(p.id));
+    actions.appendChild(btn);
+    item.appendChild(nom);
+    item.appendChild(actions);
+    elements.inviterGroupeResultats.appendChild(item);
+  });
+}
+
+async function inviterDansGroupe(userId) {
+  if (!groupeOuvert) return;
+  const { error } = await supabaseClient
+    .from('groupe_membres')
+    .insert({ groupe_id: groupeOuvert.id, user_id: userId, invite_par: authUser.id, statut: 'demande' });
+  if (error) { console.error(error); alert("L'invitation n'a pas pu être envoyée. Réessaie."); return; }
+  elements.inviterGroupeInput.value = '';
+  elements.inviterGroupeResultats.innerHTML = '';
+  elements.inviterGroupeResultats.classList.add('hidden');
+  await chargerMembresGroupe(groupeOuvert.id);
 }
 
 async function handleQuitterGroupe() {
